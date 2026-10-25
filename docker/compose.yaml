@@ -1,0 +1,16 @@
+services:
+  analyzer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      SONGSPEC_CORS_ORIGINS: "https://songspec.org,https://www.songspec.org,http://localhost:3000"
+      SONGSPEC_WORKERS: "1"
+    volumes:
+      - analyzer-data:/data
+      - ../service/models:/app/service/models:ro
+    restart: unless-stopped
+volumes:
+  analyzer-data:

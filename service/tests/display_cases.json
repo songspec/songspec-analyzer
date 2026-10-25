@@ -1,0 +1,97 @@
+{
+  "_comment": "House-style cases shared by service/tests/test_display.py and client/test/formatters.test.mjs. Taken from the brief (sections 2 and 5.6).",
+  "house_key": [
+    {"key": "D# Minor", "expect": "Eb Minor"},
+    {"key": "C# Major", "expect": "Db Major"},
+    {"key": "A# Minor", "expect": "Bb Minor"},
+    {"key": "F# Major", "expect": "Gb Major"},
+    {"key": "G# Minor", "expect": "Ab Minor"},
+    {"key": "C Major", "expect": "C Major"},
+    {"key": "A Minor", "expect": "A Minor"},
+    {"key": "A# Phrygian", "expect": "Bb Minor*"},
+    {"key": "C Phrygian Dominant", "expect": "C Minor*"},
+    {"key": "G Mixolydian", "expect": "G Major*"},
+    {"key": "F Lydian", "expect": "F Major*"},
+    {"key": "D Dorian", "expect": "D Minor*"},
+    {"key": "F Harmonic Minor", "expect": "F Minor*"},
+    {"key": "B Locrian", "expect": "B Minor*"},
+    {"key": "E Aeolian", "expect": "E Minor"},
+    {"key": "Bb Ionian", "expect": "Bb Major"}
+  ],
+  "key_note": [
+    {"key": "A# Phrygian", "source": null, "expect": "A# Phrygian"},
+    {"key": "A# Phrygian", "source": "hooktheory", "expect": "A# Phrygian - Key from Hook Theory"},
+    {"key": "Bb Phrygian", "source": null, "expect": "Bb Phrygian"},
+    {"key": "C Major", "source": null, "expect": null}
+  ],
+  "camelot": [
+    {"key": "Bb Minor", "camelot": "3A", "open_key": "8m"},
+    {"key": "A Minor", "camelot": "8A", "open_key": "1m"},
+    {"key": "C Major", "camelot": "8B", "open_key": "1d"},
+    {"key": "Db Major", "camelot": "3B", "open_key": "8d"},
+    {"key": "B Major", "camelot": "1B", "open_key": "6d"},
+    {"key": "Ab Minor", "camelot": "1A", "open_key": "6m"},
+    {"key": "F# Minor", "camelot": "11A", "open_key": "4m"},
+    {"key": "E Major", "camelot": "12B", "open_key": "5d"},
+    {"key": "A# Phrygian", "camelot": "3A", "open_key": "8m"}
+  ],
+  "sections": [
+    {"sections": [{"start": 0, "end": 30, "key": "C Phrygian Dominant"}, {"start": 30, "end": 200, "key": "C Major"}],
+     "labels": ["Intro", "Verses & Choruses"],
+     "expect_key": "C Minor* / C Major", "expect_note": "Intro in C Phrygian Dominant, Verses & Choruses in C Major"},
+    {"sections": [{"start": 0, "end": 95, "key": "F Minor"}, {"start": 95, "end": 212, "key": "C Minor"}],
+     "labels": null,
+     "expect_key": "F Minor / C Minor", "expect_note": "0:00-1:35 in F Minor, 1:35-3:32 in C Minor"},
+    {"sections": [{"start": 0, "end": 60, "key": "Bb Minor"}, {"start": 60, "end": 120, "key": "A# Minor"}],
+     "labels": null,
+     "expect_key": "Bb Minor", "expect_note": null}
+  ],
+  "house_bpm": [
+    {"raw": 57, "sig": "4/4", "bpm": 114, "display": "114"},
+    {"raw": 165, "sig": "4/4", "bpm": 82.5, "display": "82.5"},
+    {"raw": 160, "sig": "4/4", "bpm": 80, "display": "80"},
+    {"raw": 159.99, "sig": "4/4", "bpm": 159.99, "display": "160"},
+    {"raw": 79.9, "sig": "4/4", "bpm": 159.8, "display": "159.8"},
+    {"raw": 35, "sig": "4/4", "bpm": 140, "display": "140"},
+    {"raw": 128.04, "sig": "4/4", "bpm": 128.04, "display": "128"},
+    {"raw": 128.06, "sig": "4/4", "bpm": 128.06, "display": "128.1"},
+    {"raw": 62, "sig": "6/8", "bpm": 62, "display": "62"},
+    {"raw": 174, "sig": "12/8", "bpm": 174, "display": "174"}
+  ],
+  "bpm_live": [
+    {"raw": 124.5, "sig": "4/4", "sections": [122.2, 124.0, 126.8], "display": "~122 - 127", "note": "BPM inconsistent - played live"},
+    {"raw": 124.5, "sig": "4/4", "sections": [61.1, 124.0, 126.8], "display": "~122 - 127", "note": "BPM inconsistent - played live"},
+    {"raw": 120.0, "sig": "4/4", "sections": [120.0, 120.4], "display": "120", "note": null},
+    {"raw": 92.0, "sig": "6/8", "sections": [], "display": "92", "note": "Played in 6/8 time signature"}
+  ],
+  "detune": [
+    {"cents": 23.4, "display": "+23.4 ¢", "fix": "pitch by −23.4 ¢ to fix"},
+    {"cents": -12.04, "display": "−12.0 ¢", "fix": "pitch by +12.0 ¢ to fix"},
+    {"cents": 0.0, "display": "0.0 ¢", "fix": "on A440, nothing to fix"},
+    {"cents": 38.0, "tonic": "Bb", "mode": "minor", "key_text": "Plays in Bb Minor (+38.0 ¢ above Bb). If you pitch down 38.0 ¢, it's Bb Minor at A440."},
+    {"cents": -18.0, "total_cents": 82.0, "total_text": "+1 semitone, −18.0 ¢"}
+  ],
+  "roman": [
+    {"chord": "Bbm", "key": "Bb Minor", "expect": "i"},
+    {"chord": "Gb", "key": "Bb Minor", "expect": "VI"},
+    {"chord": "Db", "key": "Bb Minor", "expect": "III"},
+    {"chord": "Ab", "key": "Bb Minor", "expect": "VII"},
+    {"chord": "F", "key": "Bb Minor", "expect": "V"},
+    {"chord": "Am", "key": "C Major", "expect": "vi"},
+    {"chord": "Bb", "key": "C Major", "expect": "♭VII"},
+    {"chord": "Bb", "key": "C Mixolydian", "expect": "♭VII"},
+    {"chord": "Db", "key": "C Phrygian", "expect": "♭II"},
+    {"chord": "Ab", "key": "C Major", "expect": "♭VI"},
+    {"chord": "G7", "key": "C Major", "expect": "V7"},
+    {"chord": "Bdim", "key": "C Major", "expect": "vii°"},
+    {"chord": "Bdim", "key": "C Minor", "expect": "♯vii°"},
+    {"chord": "Fmaj7", "key": "C Major", "expect": "IVmaj7"},
+    {"chord": "Dm7b5", "key": "C Minor", "expect": "iiø7"}
+  ],
+  "tracker_row": [
+    {"song": "Example Song", "bpm": "114", "key": "Bb Minor*", "notes": ["A# Phrygian", null],
+     "expect": "Example Song\t114\tBb Minor*\tA# Phrygian"},
+    {"song": "Live Song", "bpm": "~122 - 127", "key": "C Minor* / C Major", "notes": ["Intro in C Phrygian Dominant, Verses & Choruses in C Major", "BPM inconsistent - played live"],
+     "expect": "Live Song\t~122 - 127\tC Minor* / C Major\tIntro in C Phrygian Dominant, Verses & Choruses in C Major. BPM inconsistent - played live"}
+  ]
+}

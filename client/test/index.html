@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Client Tests</title>
+<style>
+  :root { --bg: #fff; --fg: #111; --ok: #1a7f37; --bad: #cf222e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #eee; --ok: #3fb950; --bad: #f85149; } }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; margin: 16px; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>analyzer-client: formatter tests</h1>
+<p id="summary">running...</p>
+<pre id="out"></pre>
+<script type="module">
+  import { runAll } from "./formatters.test.mjs";
+  const res = await runAll(async () => (await fetch("/cases/display_cases.json")).json());
+  const bad = res.filter((r) => !r.ok);
+  const s = document.getElementById("summary");
+  s.textContent = `${res.length - bad.length}/${res.length} passed`;
+  s.className = bad.length ? "bad" : "ok";
+  document.getElementById("out").textContent = bad.map((b) => `FAIL ${b.name}\n  got  ${JSON.stringify(b.got)}\n  want ${JSON.stringify(b.want)}`).join("\n");
+  window.__testResult = { total: res.length, failed: bad.length };
+</script>
+</body>
+</html>

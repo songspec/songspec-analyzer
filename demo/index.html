@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analyzer Reference Demo</title>
+<style>
+  /* Reference harness only. SongSpec's real UI is built by the site's main dev; nothing here is meant to be copied as design. */
+  :root { --bg: #fafafa; --fg: #161616; --muted: #666; --line: #ddd; --card: #fff; --accent: #1f5fbf; --ok: #2a9d3f; --bad: #c62828; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #121212; --fg: #eee; --muted: #9a9a9a; --line: #333; --card: #1b1b1b; --accent: #6ea1ff; --ok: #4cc06a; --bad: #ef5350; }
+  }
+  :root[data-theme="dark"] { --bg: #121212; --fg: #eee; --muted: #9a9a9a; --line: #333; --card: #1b1b1b; --accent: #6ea1ff; --ok: #4cc06a; --bad: #ef5350; }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; margin: 0; padding: 16px; max-width: 980px; margin-inline: auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; } .muted { color: var(--muted); font-size: 13px; }
+  #drop { border: 2px dashed var(--line); border-radius: 10px; padding: 28px 16px; text-align: center; cursor: pointer; margin: 14px 0; }
+  #drop.over { border-color: var(--accent); }
+  form { display: flex; gap: 8px; flex-wrap: wrap; } input[type=url] { flex: 1 1 240px; padding: 8px; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; }
+  button { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
+  .job { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin: 14px 0; }
+  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; } .stage { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); }
+  .stage.done { border-color: var(--ok); color: var(--ok); } .stage.running { border-color: var(--accent); color: var(--accent); } .stage.error { border-color: var(--bad); color: var(--bad); }
+  .stage.unavailable { opacity: .5; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 10px 0; }
+  .tile { border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-height: 76px; }
+  .tile b { display: block; font-size: 22px; } .tile small { color: var(--muted); display: block; }
+  details pre { overflow: auto; max-height: 360px; font-size: 12px; }
+  .err { color: var(--bad); }
+</style>
+</head>
+<body>
+<h1>SongSpec Analyzer: reference demo</h1>
+<div class="muted">A test harness for the API and <code>client/analyzer-client.js</code>. It is not the SongSpec UI.</div>
+
+<div id="drop" tabindex="0">Drop songs here, or click to choose (several are queued one after another)</div>
+<input id="file" type="file" accept="audio/*,video/*" multiple hidden>
+<form id="linkform"><input id="link" type="url" placeholder="…or paste a Spotify / Apple Music link"><button>Analyze link</button></form>
+<label class="muted"><input id="hiacc" type="checkbox"> high accuracy (stem separation, slower)</label>
+<div id="jobs"></div>
+
+<script type="module">
+  import { createClient, trackerRowFor } from "/client/analyzer-client.js";
+  const analyzer = createClient({ baseUrl: "" });
+  const $ = (s, el = document) => el.querySelector(s);
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function card(title) {
+    const el = document.createElement("div");
+    el.className = "job";
+    el.innerHTML = `<div><b>${esc(title)}</b> <span class="muted status">queued</span></div><div class="stages"></div><div class="tiles"></div>
+      <div class="actions" hidden><button data-a="row">Copy as tracker row</button> <button data-a="json">Download JSON</button>
+      <button data-a="fb">This is wrong…</button></div><div class="err"></div><details><summary class="muted">raw JSON</summary><pre></pre></details>`;
+    $("#jobs").prepend(el);
+    return el;
+  }
+
+  function render(el, a) {
+    $(".status", el).textContent = a.status + (a.cached ? " (cached)" : "") + (a.progress ? ` · ${a.progress.message}` : "");
+    $(".stages", el).innerHTML = Object.entries(a.stages || {}).map(([k, v]) => `<span class="stage ${v}">${k}: ${v}</span>`).join("");
+    const t = [];
+    if (a.key?.display) t.push(["Key", a.key.display.key, [a.key.display.note, a.key.camelot && `${a.key.camelot} · ${a.key.open_key}`,
+      a.key.confidence != null && `${Math.round(a.key.confidence * 100)} %`, a.key.display.ambiguity_text]]);
+    if (a.tempo?.display) t.push(["BPM", a.tempo.display.bpm, [a.tempo.display.note, a.tempo.display.alternates?.join(" · ")]]);
+    if (a.detune?.display) t.push(["Detune", a.detune.display.display, [a.detune.display.fix, a.detune.display.key_text]]);
+    if (a.tempo?.signature) t.push(["Time signature", a.tempo.signature, [a.tempo.signature_conf != null && `${Math.round(a.tempo.signature_conf * 100)} %`]]);
+    if (a.track?.duration) t.push(["Length", `${Math.floor(a.track.duration / 60)}:${String(Math.round(a.track.duration % 60)).padStart(2, "0")}`,
+      [`${a.track.sample_rate} Hz · ${a.track.channels} ch`]]);
+    $(".tiles", el).innerHTML = t.map(([h, v, subs]) => `<div class="tile"><small>${h}</small><b>${esc(v ?? "–")}</b>${subs.filter(Boolean).map((s) => `<small>${esc(s)}</small>`).join("")}</div>`).join("");
+    $("pre", el).textContent = JSON.stringify(a, null, 2);
+    $(".err", el).textContent = a.status === "error" ? a.error : "";
+    if (a.status === "done") {
+      const acts = $(".actions", el);
+      acts.hidden = false;
+      acts.onclick = async (e) => {
+        const what = e.target.dataset.a;
+        if (what === "row") { await navigator.clipboard.writeText(trackerRowFor(a)); e.target.textContent = "Copied"; }
+        if (what === "json") location.href = analyzer.exportUrl(a.id, "json");
+        if (what === "fb") {
+          const field = prompt("Which value is wrong? (key, bpm, detune, signature, chords, other)", "key");
+          const correct = field && prompt(`Correct ${field}:`);
+          if (correct) { await analyzer.feedback(a.id, field, correct); e.target.textContent = "Thanks"; }
+        }
+      };
+    }
+  }
+
+  async function runFiles(files) {
+    const cards = [...files].map((f) => card(f.name));
+    const options = { high_accuracy: $("#hiacc").checked };
+    await analyzer.analyzeQueue([...files], { options, onFileUpdate: (i, a) => render(cards[i], a) })
+      .then((res) => res.forEach((r, i) => r.status === "error" && !r.id && ($(".err", cards[i]).textContent = r.error)));
+  }
+
+  const drop = $("#drop"), input = $("#file");
+  drop.onclick = () => input.click();
+  drop.onkeydown = (e) => (e.key === "Enter" || e.key === " ") && input.click();
+  input.onchange = () => input.files.length && runFiles(input.files);
+  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); e.dataTransfer.files.length && runFiles(e.dataTransfer.files); };
+  $("#linkform").onsubmit = async (e) => {
+    e.preventDefault();
+    const url = $("#link").value.trim();
+    if (!url) return;
+    const el = card(url);
+    try { await analyzer.analyzeLink(url, { options: { high_accuracy: $("#hiacc").checked }, onUpdate: (a) => render(el, a) }); }
+    catch (err) { $(".err", el).textContent = `${err.code}: ${err.message}`; $(".status", el).textContent = "error"; }
+  };
+</script>
+</body>
+</html>

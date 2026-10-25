@@ -1,0 +1,33 @@
+# reference material (read-only, not part of this repo)
+Everything Claude Needs/
+
+# environments and caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# runtime data: uploads, job database, vendored model weights
+data/
+service/models/*.ckpt
+service/models/*.pt
+service/models/*.th
+service/models/*.onnx
+
+# audio never goes in git
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.ogg
+*.aac
+*.aiff
+*.opus
+
+# local machine config (paths to the user's catalog)
+eval/local.toml
+eval/results/
+.claude/

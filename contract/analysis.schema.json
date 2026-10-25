@@ -1,0 +1,1204 @@
+{
+  "$defs": {
+    "ChordSegment": {
+      "additionalProperties": true,
+      "properties": {
+        "start": {
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "title": "End",
+          "type": "number"
+        },
+        "chord": {
+          "description": "'Bbm', 'Ebmaj7', 'C/E'; 'N' = no chord",
+          "title": "Chord",
+          "type": "string"
+        },
+        "triad": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "the chord reduced to a triad, for the simplify toggle",
+          "title": "Triad"
+        },
+        "roman": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Roman"
+        },
+        "bass": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bass"
+        },
+        "conf": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conf"
+        },
+        "on_downbeat": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Downbeat"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "chord"
+      ],
+      "title": "ChordSegment",
+      "type": "object"
+    },
+    "ChordSummaryItem": {
+      "additionalProperties": true,
+      "properties": {
+        "chord": {
+          "title": "Chord",
+          "type": "string"
+        },
+        "seconds": {
+          "title": "Seconds",
+          "type": "number"
+        },
+        "count": {
+          "default": 0,
+          "title": "Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "chord",
+        "seconds"
+      ],
+      "title": "ChordSummaryItem",
+      "type": "object"
+    },
+    "Chords": {
+      "additionalProperties": true,
+      "properties": {
+        "segments": {
+          "items": {
+            "$ref": "#/$defs/ChordSegment"
+          },
+          "title": "Segments",
+          "type": "array"
+        },
+        "summary": {
+          "items": {
+            "$ref": "#/$defs/ChordSummaryItem"
+          },
+          "title": "Summary",
+          "type": "array"
+        },
+        "progressions": {
+          "items": {
+            "$ref": "#/$defs/Progression"
+          },
+          "title": "Progressions",
+          "type": "array"
+        },
+        "vocabulary": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Vocabulary",
+          "type": "array"
+        }
+      },
+      "title": "Chords",
+      "type": "object"
+    },
+    "Detune": {
+      "additionalProperties": true,
+      "properties": {
+        "cents": {
+          "description": "reference-pitch offset from A440, wrapped to [-50, 50), 0.1 ¢ resolution",
+          "title": "Cents",
+          "type": "number"
+        },
+        "ci_cents": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "95 % confidence half-width",
+          "title": "Ci Cents"
+        },
+        "confidence": {
+          "description": "0..1",
+          "title": "Confidence",
+          "type": "number"
+        },
+        "semitones": {
+          "default": 0,
+          "description": "whole semitones of transposition when known (else 0)",
+          "title": "Semitones",
+          "type": "integer"
+        },
+        "total_cents": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Cents"
+        },
+        "a4_hz": {
+          "title": "A4 Hz",
+          "type": "number"
+        },
+        "drift": {
+          "description": "tuning per window; meaningful when drift_flag",
+          "items": {
+            "$ref": "#/$defs/DriftPoint"
+          },
+          "title": "Drift",
+          "type": "array"
+        },
+        "drift_flag": {
+          "default": false,
+          "description": "the tuning moves by more than 5 cents over the song",
+          "title": "Drift Flag",
+          "type": "boolean"
+        },
+        "secondary": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "a second tuning in the mix (e.g. an 808 off the rest): {cents, share}",
+          "title": "Secondary"
+        },
+        "estimators": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": "each estimator's vote, cents",
+          "title": "Estimators",
+          "type": "object"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DetuneDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "cents",
+        "confidence",
+        "a4_hz"
+      ],
+      "title": "Detune",
+      "type": "object"
+    },
+    "DetuneDisplay": {
+      "additionalProperties": true,
+      "properties": {
+        "display": {
+          "description": "'+23.4 ¢'",
+          "title": "Display",
+          "type": "string"
+        },
+        "fix": {
+          "description": "'pitch by −23.4 ¢ to fix'",
+          "title": "Fix",
+          "type": "string"
+        },
+        "a4_hz": {
+          "title": "A4 Hz",
+          "type": "number"
+        },
+        "semitones": {
+          "default": 0,
+          "title": "Semitones",
+          "type": "integer"
+        },
+        "total_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "'+1 semitone, −18.0 ¢' when the full transposition is known",
+          "title": "Total Text"
+        },
+        "key_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "'Plays in Bb Minor (+38.0 ¢ above Bb). If you pitch down 38.0 ¢, ...'",
+          "title": "Key Text"
+        }
+      },
+      "required": [
+        "display",
+        "fix",
+        "a4_hz"
+      ],
+      "title": "DetuneDisplay",
+      "type": "object"
+    },
+    "DriftPoint": {
+      "additionalProperties": true,
+      "properties": {
+        "t": {
+          "description": "window centre, seconds",
+          "title": "T",
+          "type": "number"
+        },
+        "cents": {
+          "title": "Cents",
+          "type": "number"
+        },
+        "ci": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "95 % half-width, cents",
+          "title": "Ci"
+        }
+      },
+      "required": [
+        "t",
+        "cents"
+      ],
+      "title": "DriftPoint",
+      "type": "object"
+    },
+    "Key": {
+      "additionalProperties": true,
+      "properties": {
+        "tonic": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "flat spelling, 'Bb'",
+          "title": "Tonic"
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "enum": [
+                "major",
+                "minor"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scale"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "'Phrygian' etc. when it clearly beats plain major/minor; else null",
+          "title": "Mode"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "calibrated probability of the top key, 0..1",
+          "title": "Confidence"
+        },
+        "ambiguous": {
+          "default": false,
+          "title": "Ambiguous",
+          "type": "boolean"
+        },
+        "camelot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Camelot"
+        },
+        "open_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Open Key"
+        },
+        "candidates": {
+          "description": "top 3",
+          "items": {
+            "$ref": "#/$defs/KeyCandidate"
+          },
+          "title": "Candidates",
+          "type": "array"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/KeySection"
+          },
+          "title": "Sections",
+          "type": "array"
+        },
+        "modulations": {
+          "description": "[{t, from, to, kind}] e.g. kind 'half-step lift'",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Modulations",
+          "type": "array"
+        },
+        "estimators": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "description": "each estimator's top key and probability",
+          "title": "Estimators",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "description": "{'hooktheory': {key, bpm, url, agrees}}",
+          "title": "Metadata",
+          "type": "object"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeyDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "Key",
+      "type": "object"
+    },
+    "KeyCandidate": {
+      "additionalProperties": true,
+      "properties": {
+        "key": {
+          "description": "house style, e.g. 'Bb Minor'",
+          "title": "Key",
+          "type": "string"
+        },
+        "p": {
+          "title": "P",
+          "type": "number"
+        }
+      },
+      "required": [
+        "key",
+        "p"
+      ],
+      "title": "KeyCandidate",
+      "type": "object"
+    },
+    "KeyDisplay": {
+      "additionalProperties": true,
+      "properties": {
+        "key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "'Bb Minor*', 'C Minor* / C Major'",
+          "title": "Key"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "'A# Phrygian', 'Intro in C Phrygian Dominant, Verses & Choruses in C Major'",
+          "title": "Note"
+        },
+        "ambiguity_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "'ambiguous between C Major and A Minor' when confidence is low",
+          "title": "Ambiguity Text"
+        }
+      },
+      "title": "KeyDisplay",
+      "type": "object"
+    },
+    "KeySection": {
+      "additionalProperties": true,
+      "properties": {
+        "start": {
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "title": "End",
+          "type": "number"
+        },
+        "key": {
+          "description": "full name incl. mode, e.g. 'C Phrygian Dominant'",
+          "title": "Key",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "house style, e.g. 'C Minor*'",
+          "title": "Display"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "key"
+      ],
+      "title": "KeySection",
+      "type": "object"
+    },
+    "Progress": {
+      "additionalProperties": true,
+      "properties": {
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "message": {
+          "description": "Human-readable, e.g. 'Finding beats...'",
+          "title": "Message",
+          "type": "string"
+        },
+        "fraction": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "0..1 within the stage, when known",
+          "title": "Fraction"
+        }
+      },
+      "required": [
+        "stage",
+        "message"
+      ],
+      "title": "Progress",
+      "type": "object"
+    },
+    "Progression": {
+      "additionalProperties": true,
+      "properties": {
+        "roman": {
+          "description": "'i-VI-III-VII'",
+          "title": "Roman",
+          "type": "string"
+        },
+        "chords": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "'Bbm-Gb-Db-Ab'",
+          "title": "Chords"
+        },
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "'i–VI–III–VII ×8'",
+          "title": "Display"
+        }
+      },
+      "required": [
+        "roman",
+        "count"
+      ],
+      "title": "Progression",
+      "type": "object"
+    },
+    "Tempo": {
+      "additionalProperties": true,
+      "properties": {
+        "bpm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "house-rule BPM (80-160 unless compound meter), 2 decimals",
+          "title": "Bpm"
+        },
+        "bpm_raw": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "the felt tempo as detected",
+          "title": "Bpm Raw"
+        },
+        "bpm_source": {
+          "default": "audio",
+          "enum": [
+            "audio",
+            "hooktheory"
+          ],
+          "title": "Bpm Source",
+          "type": "string"
+        },
+        "alternates": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Alternates",
+          "type": "array"
+        },
+        "signature": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signature"
+        },
+        "signature_conf": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signature Conf"
+        },
+        "compound": {
+          "default": false,
+          "title": "Compound",
+          "type": "boolean"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/TempoSection"
+          },
+          "title": "Sections",
+          "type": "array"
+        },
+        "range": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "[lo, hi] house-rule BPM when played live",
+          "title": "Range"
+        },
+        "irregularity_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Irregularity Pct"
+        },
+        "feel": {
+          "anyOf": [
+            {
+              "enum": [
+                "grid",
+                "live"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Feel"
+        },
+        "beats": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Beats",
+          "type": "array"
+        },
+        "downbeats": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Downbeats",
+          "type": "array"
+        },
+        "curve": {
+          "$ref": "#/$defs/TempoCurve",
+          "description": "per-beat tempo, at most 1500 points"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TempoDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "Tempo",
+      "type": "object"
+    },
+    "TempoCurve": {
+      "additionalProperties": true,
+      "properties": {
+        "t": {
+          "items": {
+            "type": "number"
+          },
+          "title": "T",
+          "type": "array"
+        },
+        "bpm": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Bpm",
+          "type": "array"
+        }
+      },
+      "title": "TempoCurve",
+      "type": "object"
+    },
+    "TempoDisplay": {
+      "additionalProperties": true,
+      "properties": {
+        "bpm": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "'114', '82.5', '~122 - 127'",
+          "title": "Bpm"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "'BPM inconsistent - played live', 'Played in 6/8 time signature'",
+          "title": "Note"
+        },
+        "alternates": {
+          "description": "½x / 1x / 2x as display strings, for chips",
+          "items": {
+            "type": "string"
+          },
+          "title": "Alternates",
+          "type": "array"
+        }
+      },
+      "title": "TempoDisplay",
+      "type": "object"
+    },
+    "TempoSection": {
+      "additionalProperties": true,
+      "properties": {
+        "start": {
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "title": "End",
+          "type": "number"
+        },
+        "bpm": {
+          "description": "raw felt BPM of the section",
+          "title": "Bpm",
+          "type": "number"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "bpm"
+      ],
+      "title": "TempoSection",
+      "type": "object"
+    },
+    "Track": {
+      "additionalProperties": true,
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "artist": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artist"
+        },
+        "isrc": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Isrc"
+        },
+        "duration": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "seconds",
+          "title": "Duration"
+        },
+        "source": {
+          "default": "upload",
+          "enum": [
+            "upload",
+            "spotify-preview",
+            "apple-preview",
+            "deezer-preview"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "file_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "File Name"
+        },
+        "sample_rate": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sample Rate"
+        },
+        "channels": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channels"
+        },
+        "fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Chromaprint (when fpcalc is installed)",
+          "title": "Fingerprint"
+        }
+      },
+      "title": "Track",
+      "type": "object"
+    }
+  },
+  "additionalProperties": true,
+  "description": "GET /v1/analyses/{id}",
+  "properties": {
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "queued",
+        "running",
+        "done",
+        "error"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "cached": {
+      "default": false,
+      "title": "Cached",
+      "type": "boolean"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "user-safe message when status = error",
+      "title": "Error"
+    },
+    "stages": {
+      "additionalProperties": {
+        "enum": [
+          "pending",
+          "running",
+          "done",
+          "error",
+          "skipped",
+          "unavailable"
+        ],
+        "type": "string"
+      },
+      "title": "Stages",
+      "type": "object"
+    },
+    "progress": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Progress"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Track"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "detune": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Detune"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "tempo": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Tempo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "key": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Key"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "chords": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Chords"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    },
+    "versions": {
+      "additionalProperties": true,
+      "title": "Versions",
+      "type": "object"
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Created At"
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Updated At"
+    }
+  },
+  "required": [
+    "id",
+    "status"
+  ],
+  "title": "Analysis",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://songspec.org/schemas/analysis-1.0.0.json"
+}

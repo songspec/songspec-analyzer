@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "songspec-analyzer"
+version = "0.1.0"
+description = "Key, BPM, chord and detune analysis service for songspec.org"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "python-multipart>=0.0.9",
+    "pydantic>=2.6",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "soundfile>=0.12",
+    "librosa>=0.10",
+]
+
+[project.optional-dependencies]
+ml = ["torch>=2.2", "beat-this", "demucs>=4.0", "torchcrepe", "basic-pitch"]
+redis = ["redis>=5", "rq>=1.16"]
+dev = ["pytest>=8", "httpx>=0.27", "mir_eval>=0.7"]
+
+[tool.setuptools.packages.find]
+include = ["songspec_analyzer*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
