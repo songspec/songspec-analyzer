@@ -10,6 +10,7 @@ import numpy as np
 
 from ..display.key import FLAT_NAMES, camelot, house_key, key_display, open_key, sections_display
 from . import KEY_NAMES, estimators as E
+from .borrow import borrow_note, borrowed
 from .chordkey import chord_features
 from .fusion import KeyFusion, candidate_features, feature_matrix
 from .modes import centsible_mode, choose_mode
@@ -101,6 +102,18 @@ def sections_from_windows(wk, duration, bar_len):
     return secs
 
 
+def _in_key_sections(seg, sections, tonic_name, minor):
+    """Is this chord inside a section in the song's main key? (No sections: every chord is.) Borrowing is judged against the key
+    the chord is played in, so a modulated final chorus does not read as borrowed chords."""
+    if not sections:
+        return True
+    mid = 0.5 * (seg["start"] + seg["end"])
+    for s in sections:
+        if s["start"] <= mid < s["end"]:
+            return s["key"].split()[0] == tonic_name and (s["display"].split()[1].rstrip("*") == "Minor") == minor
+    return False
+
+
 def modulation_kind(k1, k2):
     if (k1 >= 12) != (k2 >= 12):
         return "mode change" if k1 % 12 == k2 % 12 else "key change"
@@ -134,9 +147,9 @@ def stage(ctx):
         else:                                            # the model needs S-KEY: without it, fall back to Centsible's key
             model = None
     prev = ctx.store.get(ctx.aid)["result"].get("key") or {}
+    tie = candidate_features(ck["chroma_scale"], ck["chroma_bass"], seq)
+    chf = chord_features(ctx.data.get("chords") or [], a.duration)
     if model is not None:
-        tie = candidate_features(ck["chroma_scale"], ck["chroma_bass"], seq)
-        chf = chord_features(ctx.data.get("chords") or [], a.duration)
         p = model.predict_proba(est, feature_matrix(model.feature_kind, tie, chf))
         source = "fusion"
     else:
@@ -183,18 +196,30 @@ def stage(ctx):
         "tonic": FLAT_NAMES[tonic], "scale": "minor" if minor else "major",
         "mode": None if mode in ("major", "minor") else _mode_name(mode),
         "confidence": round(float(p[top]), 3), "ambiguous": ambiguous, "camelot": camelot(tonic, mode), "open_key": open_key(tonic, mode),
-        "candidates": cands, "sections": sections, "modulations": modulations, "estimators": estimators,
+        "candidates": cands, "sections": sections, "modulations": modulations, "borrows": [], "estimators": estimators,
         "metadata": prev.get("metadata") or {}, "preliminary": False, "display": display,
     }}
     from ..chords import annotate, progressions
     segs = ctx.data.get("chords")
     if segs:
+        main = [s for s in segs if _in_key_sections(s, sections, out["key"]["tonic"], minor)]
+        out["key"]["borrows"] = borrowed(main, tonic, mode)
+        bn = borrow_note(out["key"]["borrows"])
+        if bn:
+            display["note"] = f"{display['note']} - {bn}" if display["note"] else bn
         annotate(segs, tonic, mode)
         ch = ctx.store.get(ctx.aid)["result"].get("chords") or {}
         ch["segments"] = [{k: s[k] for k in ("start", "end", "chord", "triad", "roman", "bass", "conf", "on_downbeat")} for s in segs]
         if tempo:
             ch["progressions"] = progressions(segs, tempo["downbeats"])
         out["chords"] = ch
+    try:                                                 # evidence for retraining from user corrections (eval/key_retrain.py)
+        ctx.store.save_key_evidence(ctx.aid, {
+            "est": {n: np.round(np.asarray(v, float), 5).tolist() for n, v in est.items()},
+            "tie": np.round(np.asarray(tie, float), 5).tolist(), "chf": np.round(np.asarray(chf, float), 5).tolist(),
+            "detected": top, "source": source})
+    except Exception:                                    # never fail an analysis over this
+        pass
     from ..detune import with_key_text
     det = with_key_text(ctx.store.get(ctx.aid)["result"].get("detune"), tonic, mode)
     if det:

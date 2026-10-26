@@ -45,6 +45,16 @@ CREATE TABLE IF NOT EXISTS feedback (
     user TEXT,
     created_at REAL NOT NULL
 );
+CREATE INDEX IF NOT EXISTS ix_fb_aid ON feedback(analysis_id);
+CREATE INDEX IF NOT EXISTS ix_fb_fp ON feedback(fingerprint);
+CREATE TABLE IF NOT EXISTS key_evidence (   -- what the key fusion saw, per analysis: lets corrections retrain it without the audio
+    analysis_id TEXT PRIMARY KEY,
+    fingerprint TEXT,
+    file_sha256 TEXT,
+    engine_version TEXT NOT NULL,
+    data TEXT NOT NULL,                -- {"est": {name: [24]}, "tie": [[...]], "chf": [[...]], "detected": 0..23}
+    created_at REAL NOT NULL
+);
 """
 
 _JSON_COLS = ("options", "stages", "result")
@@ -62,6 +72,8 @@ class Store:
             if col not in cols:
                 self._db.execute(f"ALTER TABLE analyses ADD COLUMN {col} TEXT")
         self._db.execute("CREATE INDEX IF NOT EXISTS ix_meta ON analyses(norm_artist, norm_title)")
+        if "file_sha256" not in {r[1] for r in self._db.execute("PRAGMA table_info(feedback)")}:
+            self._db.execute("ALTER TABLE feedback ADD COLUMN file_sha256 TEXT")
         self._db.commit()
 
     # ---------------------------------------------------------------- analyses
@@ -167,13 +179,48 @@ class Store:
 
     # ---------------------------------------------------------------- feedback
     def add_feedback(self, aid, field, value, comment=None, user=None):
-        row = self.get(aid)
+        row = self.get(aid) or {}
         with self._lock:
             self._db.execute(
-                "INSERT INTO feedback (analysis_id, fingerprint, isrc, field, value, comment, user, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (aid, row["fingerprint"] if row else None, row["isrc"] if row else None, field, value, comment, user, time.time()))
+                "INSERT INTO feedback (analysis_id, fingerprint, isrc, file_sha256, field, value, comment, user, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (aid, row.get("fingerprint"), row.get("isrc"), row.get("file_sha256"), field, value, comment, user, time.time()))
             self._db.commit()
+
+    def key_correction(self, row):
+        """The latest key correction for this song: made on this analysis, on the one it was cached from, or on any analysis of
+        the same file / fingerprint / ISRC. -> {'value', 'created_at', 'user', 'analysis_id'} or None."""
+        ids = [i for i in (row.get("id"), row.get("cached_from")) if i]
+        where, args = [f"analysis_id IN ({','.join('?' * len(ids))})"], list(ids)
+        for col in ("file_sha256", "fingerprint", "isrc"):
+            if row.get(col):
+                where.append(f"{col} = ?")
+                args.append(row[col])
+        with self._lock:
+            r = self._db.execute(f"SELECT analysis_id, value, created_at, user FROM feedback WHERE field = 'key' AND "
+                                 f"({' OR '.join(where)}) ORDER BY id DESC LIMIT 1", args).fetchone()
+        return dict(r) if r else None
+
+    def save_key_evidence(self, aid, data):
+        row = self.get(aid) or {}
+        with self._lock:
+            self._db.execute("INSERT OR REPLACE INTO key_evidence (analysis_id, fingerprint, file_sha256, engine_version, data, "
+                             "created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                             (aid, row.get("fingerprint"), row.get("file_sha256"), ENGINE_VERSION, json.dumps(data), time.time()))
+            self._db.commit()
+
+    def key_evidence(self, aid):
+        """Evidence for this analysis, or for the analysis it was cached from."""
+        row = self.get(aid) or {}
+        with self._lock:
+            for i in (aid, row.get("cached_from")):
+                if i:
+                    r = self._db.execute("SELECT * FROM key_evidence WHERE analysis_id = ?", (i,)).fetchone()
+                    if r:
+                        d = dict(r)
+                        d["data"] = json.loads(d["data"])
+                        return d
+        return None
 
     def feedback(self):
         with self._lock:

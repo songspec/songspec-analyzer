@@ -150,10 +150,21 @@ export function createClient({ baseUrl = "", apiKey = null, headers = {}, fetch:
 
   /** "This is wrong": field in key | bpm | detune | signature | chords | other */
   async function feedback(id, field, correct, comment = null) {
-    await request(`/v1/analyses/${encodeURIComponent(id)}/feedback`, {
+    const r = await request(`/v1/analyses/${encodeURIComponent(id)}/feedback`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ field, correct, comment }),
     });
+    return r.json();
   }
+
+  /** "The key is wrong, it's actually ___": key = any key name ('Bb Minor', 'A# Phrygian', 'F#m'; keys() lists them).
+   *  Resolves to the analysis with the corrected key (key.corrected holds what was detected). Every later view of the same song
+   *  shows the correction, and the server keeps it for retraining the key model. Rejects with code 'bad_key' for a non-key. */
+  async function correctKey(id, key, comment = null) {
+    return (await feedback(id, "key", key, comment)).analysis;
+  }
+
+  /** Every key a correction can name, house style: [{value: 'A Dorian', key: 'A Minor*', tonic, mode, minor}]. */
+  const keys = async () => (await (await request("/v1/keys")).json()).keys;
 
   const version = async () => (await request("/v1/version")).json();
 
@@ -179,8 +190,8 @@ export function createClient({ baseUrl = "", apiKey = null, headers = {}, fetch:
   const match = async (a, b) =>
     (await request(`/v1/match?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`)).json();
 
-  return { start, startLink, get, watch, analyzeFile, analyzeLink, analyzeQueue, exportUrl, exportBlob, feedback, version, match,
-    fixBpm };
+  return { start, startLink, get, watch, analyzeFile, analyzeLink, analyzeQueue, exportUrl, exportBlob, feedback, correctKey, keys, version,
+    match, fixBpm };
 }
 
 // ------------------------------------------------------------------------------------------------ helpers

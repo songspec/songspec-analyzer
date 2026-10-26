@@ -153,3 +153,32 @@ def test_sweeper_deletes_expired_audio(tmp_path):
     time.sleep(0.01)
     assert AudioSweeper(st, s).sweep_once() >= 1
     assert not p.exists() and st.get(aid)["audio_path"] is None
+
+
+def test_key_correction_applies_to_the_song(client, song):
+    aid = upload(client, song).json()["id"]
+    v = wait_done(client, aid)
+    assert v.get("key"), "the synthetic song should get a key"
+    assert client.post(f"/v1/analyses/{aid}/feedback", json={"field": "key", "correct": "not a key"}).status_code == 422
+    r = client.post(f"/v1/analyses/{aid}/feedback", json={"field": "key", "correct": "A# Phrygian"})
+    assert r.status_code == 201 and r.json()["analysis"]["key"]["display"]["key"] == "Bb Minor*"
+    k = client.get(f"/v1/analyses/{aid}").json()["key"]
+    assert k["tonic"] == "Bb" and k["scale"] == "minor" and k["mode"] == "Phrygian" and k["camelot"] == "3A"
+    assert k["display"]["note"].startswith("A# Phrygian")              # the user's spelling kept in the note
+    assert k["corrected"]["detected"]["display"]["key"] == v["key"]["display"]["key"]
+    again = upload(client, song).json()                                  # the same file again (cache hit): still corrected
+    assert again["cached"] and again["key"]["corrected"]["key"] == "Bb Minor*"
+    # the latest correction wins
+    client.post(f"/v1/analyses/{aid}/feedback", json={"field": "key", "correct": "C Major"})
+    assert client.get(f"/v1/analyses/{again['id']}").json()["key"]["display"]["key"] == "C Major"
+    keys = client.get("/v1/keys").json()["keys"]
+    assert {"Bb Minor", "Db Major", "A Dorian", "F# Phrygian".replace("F#", "Gb")} <= {k["value"] for k in keys}
+
+
+def test_key_evidence_is_saved_for_retraining(client, song):
+    from songspec_analyzer.store import Store
+    aid = upload(client, song).json()["id"]
+    v = wait_done(client, aid)
+    ev = Store(client.settings.data_dir / "analyzer.sqlite3").key_evidence(aid)
+    assert ev is not None and "centsible" in ev["data"]["est"] and len(ev["data"]["est"]["centsible"]) == 24
+    assert ev["data"]["detected"] in range(24)

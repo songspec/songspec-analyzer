@@ -26,12 +26,27 @@ export interface Tempo {
   display?: { bpm?: string | null; note?: string | null; alternates: string[] };
 }
 
+export interface KeyBorrow {
+  /** 'C Mixolydian', 'C Minor', 'A Harmonic Minor' */
+  from: string; tonic: string;
+  /** 'mixolydian' | 'aeolian' | 'dorian' | 'phrygian' | 'lydian' | 'locrian' | 'harmonic_minor' | 'melodic_minor' | ... */
+  mode: string;
+  /** the outside chords it explains, longest first */
+  chords: string[]; seconds: number; share: number;
+}
+
+export interface KeyChoice { value: string; key: string; tonic: string; mode: string; minor: boolean }
+
 export interface Key {
   tonic?: string | null; scale?: "major" | "minor" | null; mode?: string | null; confidence?: number | null; ambiguous: boolean;
   camelot?: string | null; open_key?: string | null;
   candidates: { key: string; p: number }[];
   sections: { start: number; end: number; key: string; display?: string | null }[];
   modulations: { t: number; from: string; to: string; kind?: string }[];
+  /** "May borrow from": outside chords traced to their scale, strongest first. key.display.note already says it in words. */
+  borrows: KeyBorrow[];
+  /** Set when a user corrected the key; the other fields then show the corrected key. */
+  corrected?: { key: string; value: string; at?: number | null; by?: string | null; detected: Partial<Key> } | null;
   estimators: Record<string, { key?: string; p?: number; [k: string]: unknown }>;
   metadata: { hooktheory?: { key?: string; bpm?: number; url?: string; agrees?: boolean } ; [k: string]: unknown };
   display?: { key?: string | null; note?: string | null; ambiguity_text?: string | null };
@@ -80,7 +95,11 @@ export interface AnalyzerClient {
     Promise<(Analysis | { status: "error"; error: string; code?: string })[]>;
   exportUrl(id: string, format: ExportFormat, opts?: { transpose?: number; simplify?: boolean }): string;
   exportBlob(id: string, format: ExportFormat, opts?: { transpose?: number; simplify?: boolean }): Promise<Blob>;
-  feedback(id: string, field: "key" | "bpm" | "detune" | "signature" | "chords" | "other", correct: string, comment?: string | null): Promise<void>;
+  feedback(id: string, field: "key" | "bpm" | "detune" | "signature" | "chords" | "other", correct: string, comment?: string | null): Promise<{ ok: boolean; analysis: Analysis | null }>;
+  /** "The key is wrong, it's actually ___". Resolves to the analysis with the corrected key. */
+  correctKey(id: string, key: string, comment?: string | null): Promise<Analysis>;
+  /** Every key a correction can name (24 major/minor + each mode on each tonic). */
+  keys(): Promise<KeyChoice[]>;
   version(): Promise<{ engine: string; schema: string; formats: string[]; limits: { max_upload_mb: number; max_duration_s: number } }>;
   match(a: string, b: string): Promise<MatchAdvice>;
   fixBpm(file: Blob, opts?: { options?: FixOptions; onUpdate?: (v: FixJob) => void; signal?: AbortSignal; fileName?: string }):

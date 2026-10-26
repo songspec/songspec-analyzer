@@ -16,7 +16,10 @@ TEST PAGE
   - Key / BPM / Detune / Time signature fill in as they are measured.
   - Play the song: the current chord is shown live; "Click track" clicks on the detected beats (are they right?);
     "Hear at A440" plays it corrected by its detune.
-  - "This is wrong..." saves your correction (that is the most useful thing to do!).
+  - Key wrong? Open "key is wrong?" on the Key tile, pick the right key and mode, Save. The page then shows your key
+    for that song, and the analyzer can learn from it (most useful thing to do!).
+  - "May borrow from ..." under the key: scales the chords borrow from (a guess - say if it is off, with "This is wrong...").
+  - "This is wrong..." saves a correction for BPM, detune, time signature or chords.
   - "Copy tracker row" copies  Song <tab> BPM <tab> Key <tab> Note  for the Google Sheet.
   - Fix BPM (bottom): makes a song run at one constant tempo and gives you the file.
   - Mashup helper (bottom): pick two analysed songs, it says how to pitch / stretch B onto A.
@@ -27,4 +30,8 @@ KNOWN WEAK SPOTS
   - "BPM inconsistent / played live" is only flagged for clear drift.
 
 GPU: with an NVIDIA card, set SONGSPEC_TORCH=cu130 before the FIRST start to install the GPU version (bigger download, faster).
+SENDING YOUR CORRECTIONS BACK
+  Your corrections are saved in  data\analyzer.sqlite3  in this folder (numbers and your corrections only, no audio).
+  Send that one file to the developer when you are done testing.
+
 Problems: delete the .venv folder and start again; send the black window's messages to the developer.

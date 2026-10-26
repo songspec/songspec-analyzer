@@ -33,14 +33,18 @@ def _err(status, code, message, headers=None, extra=None):
     return JSONResponse({"error": {"code": code, "message": message, **(extra or {})}}, status_code=status, headers=headers)
 
 
-def public_view(row):
-    """What clients see: status + the result so far. Internal columns (paths, hashes) are never exposed."""
+def public_view(row, store=None):
+    """What clients see: status + the result so far. Internal columns (paths, hashes) are never exposed.
+    With the store, a user's key correction for this song is applied (key/correct.py)."""
     res = dict(row["result"])
     out = {"id": row["id"], "status": row["status"], "cached": bool(row.get("cached_from")) or bool(res.pop("cached", False)),
            "stages": row["stages"], "error": row.get("error"), "schema_version": res.pop("schema_version", SCHEMA_VERSION)}
     out.update(res)
     out.setdefault("warnings", [])
     out["created_at"], out["updated_at"] = row["created_at"], row["updated_at"]
+    if store is not None and out.get("key"):
+        from ..key import correct
+        correct.apply(out, store.key_correction(row))
     return out
 
 
@@ -166,12 +170,12 @@ def create_app(settings: Settings = None) -> FastAPI:
                          fingerprint=hit["fingerprint"], duration=hit["duration"], isrc=hit["isrc"])
         else:
             state["queue"].submit(aid)
-        return public_view(store.get(aid))
+        return public_view(store.get(aid), state["store"])
 
     # ------------------------------------------------------------------ follow
     @app.get("/v1/analyses/{aid}")
     async def get_analysis(aid: str):
-        return public_view(get_row(aid))
+        return public_view(get_row(aid), state["store"])
 
     @app.get("/v1/analyses/{aid}/events")
     async def events(aid: str, request: Request):
@@ -190,7 +194,7 @@ def create_app(settings: Settings = None) -> FastAPI:
                 row = store.get(aid)
                 if row["updated_at"] != last:
                     last = row["updated_at"]
-                    view = json.dumps(public_view(row), separators=(",", ":"))
+                    view = json.dumps(public_view(row, state["store"]), separators=(",", ":"))
                     if row["status"] in ("done", "error"):
                         yield f"event: {row['status']}\ndata: {view}\n\n"
                         return
@@ -210,7 +214,7 @@ def create_app(settings: Settings = None) -> FastAPI:
         row = get_row(aid)
         if row["status"] != "done":
             raise ApiError(409, "not_ready", "the analysis has not finished yet")
-        view = public_view(row)
+        view = public_view(row, state["store"])
         from ..export import EXPORTERS
         if fmt not in EXPORTERS:
             raise ApiError(404, "unknown_format", f"formats: {', '.join(EXPORTERS)}")
@@ -227,9 +231,23 @@ def create_app(settings: Settings = None) -> FastAPI:
         field, value = body.get("field"), body.get("correct")
         if field not in FEEDBACK_FIELDS or not isinstance(value, (str, int, float)) or not str(value).strip():
             raise ApiError(422, "bad_feedback", f"send {{field: one of {list(FEEDBACK_FIELDS)}, correct: '...'}}")
-        state["store"].add_feedback(aid, field, str(value)[:200], (body.get("comment") or "")[:1000] or None,
+        value = str(value).strip()[:200]
+        if field == "key":                                    # must be a real key: it is shown in place of the detected one
+            from ..key import correct
+            try:
+                correct.normalise(value)
+            except ValueError:
+                raise ApiError(422, "bad_key", "correct must be a key such as 'Bb Minor', 'A# Phrygian', 'F#m' "
+                                               "(GET /v1/keys lists every choice)")
+        state["store"].add_feedback(aid, field, value, (body.get("comment") or "")[:1000] or None,
                                     request.headers.get("x-songspec-user"))
-        return {"ok": True}
+        return {"ok": True, "analysis": public_view(get_row(aid), state["store"]) if field == "key" else None}
+
+    @app.get("/v1/keys")
+    async def keys():
+        """Every key a correction can name (house style), for a picker: 24 major/minor keys and each mode on each tonic."""
+        from ..key import correct
+        return {"keys": correct.choices()}
 
     # ------------------------------------------------------------------ Fix BPM (BPM Fixer's process() on the server)
     @app.post("/v1/fix-bpm", status_code=202)
@@ -311,7 +329,7 @@ def create_app(settings: Settings = None) -> FastAPI:
         ra, rb = get_row(a), get_row(b)
         if ra["status"] != "done" or rb["status"] != "done":
             raise ApiError(409, "not_ready", "both analyses must have finished")
-        return advise(public_view(ra), public_view(rb))
+        return advise(public_view(ra, state["store"]), public_view(rb, state["store"]))
 
     # ------------------------------------------------------------------ ops
     @app.get("/v1/health")

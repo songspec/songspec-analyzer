@@ -105,3 +105,40 @@ def test_chord_key_features_separate_relative_keys():
     # v -> i counts for Bb minor; VI -> III (Gb -> Db) is IV -> I of the relative major: the loop is ambiguous there by nature
     assert F[bbm, col["ch_cadence"]] > 0 and F[db, col["ch_cadence"]] > 0
     assert chord_features([], 60.0).sum() == 0
+
+
+def _segs(prog, dur=2.0):
+    return [{"start": i * dur, "end": i * dur + dur, "chord": c} for i, c in enumerate(prog)]
+
+
+@pytest.mark.parametrize("prog,tonic,mode,expect", [
+    (["C", "F", "G", "C", "Bb", "F"] * 4, 0, "major", ["C Mixolydian"]),          # bVII
+    (["C", "D", "G", "C", "D", "F"] * 4, 0, "major", ["C Lydian"]),               # II
+    (["C", "Db", "G", "C", "Db", "F"] * 4, 0, "major", ["C Phrygian"]),           # bII
+    (["Am", "D", "Am", "D", "Em", "G"] * 4, 9, "minor", ["A Dorian"]),            # IV in minor
+    (["Am", "Bb", "Am", "Bb", "Dm", "Em"] * 4, 9, "minor", ["A Phrygian"]),       # bII in minor
+    (["Am", "A", "Dm", "Am", "A", "Dm"] * 4, 9, "minor", []),                     # tonic chords never count (3rd often missing)
+    (["Am", "D", "Am", "Dbm", "Am", "D"] * 4, 9, "minor", ["A Major"]),           # IV + iii in minor: the parallel major
+    (["C", "Fm", "G", "C", "Fm", "G"] * 4, 0, "major", ["C Minor"]),              # iv: the parallel minor
+    (["C", "Bb", "Fm", "Ab", "C", "G"] * 4, 0, "major", ["C Minor"]),             # bVII + iv + bVI: the parallel minor
+    (["C", "E7", "Am", "F", "E7", "Am"] * 4, 0, "major", ["A Harmonic Minor"]),   # V/vi: the relative minor's harmonic minor
+    (["Bdim", "C", "Bdim", "F", "Bdim", "C"] * 4, 11, "locrian", []),              # a modal home (B Locrian): all home
+    (["Bdim", "C", "Bdim", "D", "Bdim", "C"] * 4, 11, "locrian", ["B Phrygian"]),   # ... D major (F#): Phrygian
+    (["Dm", "G", "Dm", "G", "C", "Dm"] * 4, 2, "dorian", []),                     # all home in D Dorian
+    (["C", "Am", "F", "G"] * 6 + ["Eb"], 0, "major", []),                          # one stray chord is noise
+    (["Am", "F", "C", "E"] * 6, 9, "minor", ["A Harmonic Minor"]),                 # minor V: the tracker's "Harmonic Minor"
+    (["Am", "E", "Am", "D", "Am", "E"] * 4, 9, "minor", ["A Harmonic Minor", "A Dorian"]),  # V and IV: listed apart
+])
+def test_borrowed_chords_name_the_nearest_mode(prog, tonic, mode, expect):
+    from songspec_analyzer.key.borrow import borrowed
+    assert [f["from"] for f in borrowed(_segs(prog), tonic, mode)] == expect
+
+
+def test_borrow_note_and_fields():
+    from songspec_analyzer.key.borrow import borrow_note, borrowed, scale
+    assert scale("ionian") == {0, 2, 4, 5, 7, 9, 11}
+    found = borrowed(_segs(["C", "F", "G", "C", "Bb", "F", "C", "D", "G", "D"] * 3), 0, "major")
+    assert {f["from"] for f in found} == {"C Mixolydian", "C Lydian"}
+    assert found[0]["chords"] and 0 < found[0]["share"] < 1
+    assert borrow_note(found).startswith("May borrow from C ")
+    assert borrow_note([]) is None

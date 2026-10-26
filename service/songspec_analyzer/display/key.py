@@ -25,6 +25,10 @@ MODES = {
     "locrian":           ("Minor", "Locrian",           (0, 1, 3, 5, 6, 8, 10)),
     "harmonic_minor":    ("Minor", "Harmonic Minor",    (0, 2, 3, 5, 7, 8, 11)),
     "phrygian_dominant": ("Minor", "Phrygian Dominant", (0, 1, 4, 5, 7, 8, 10)),
+    "melodic_minor":     ("Minor", "Melodic Minor",     (0, 2, 3, 5, 7, 9, 11)),
+    "harmonic_major":    ("Major", "Harmonic Major",    (0, 2, 4, 5, 7, 8, 11)),
+    "lydian_dominant":   ("Major", "Lydian Dominant",   (0, 2, 4, 6, 7, 9, 10)),
+    "hungarian_minor":   ("Minor", "Hungarian Minor",   (0, 2, 3, 6, 7, 8, 11)),
 }
 PLAIN = {"major", "minor", "ionian", "aeolian"}      # shown without an asterisk
 

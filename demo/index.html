@@ -49,6 +49,9 @@
   .tile .value { font-size: 26px; font-weight: 650; margin: 2px 0; line-height: 1.15; }
   .tile .sub { font-size: 13px; color: var(--muted); }
   .tile .pending { color: var(--muted); font-size: 14px; }
+  form.fixkey { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+  form.fixkey select, form.fixkey input { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; max-width: 100%; }
+  form.fixkey button.small { padding: 4px 10px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .chip { font-size: 12px; border: 1px solid var(--line); border-radius: 99px; padding: 1px 8px; color: var(--muted); }
   .chip.on { border-color: var(--accent); color: var(--accent); }
@@ -176,10 +179,15 @@ function render(el, a, st) {
   if (a.key?.display) {
     const k = a.key;
     const votes = Object.entries(k.estimators || {}).map(([n, e]) => `${n}: ${e.key ?? "?"}${e.p != null ? ` (${Math.round(e.p * 100)} %)` : ""}`);
-    tile(el, "key", k.display.key, [k.display.note, `${k.camelot} · ${k.open_key}${k.confidence != null ? ` · ${Math.round(k.confidence * 100)} %` : ""}`,
+    const borrowed = (k.borrows || []).map((b) => `${b.chords.join(", ")} → ${b.from}`);
+    tile(el, "key", k.display.key, [k.display.note, `${k.camelot} · ${k.open_key}${k.confidence != null && !k.corrected ? ` · ${Math.round(k.confidence * 100)} %` : ""}`,
+      k.corrected ? `corrected by you · detected ${k.corrected.detected?.display?.key ?? "?"}` : null,
       k.display.ambiguity_text, k.preliminary ? "quick estimate, refining…" : null],
-      `<div class="chips">${(k.candidates || []).map((c, i) => `<span class="chip ${i === 0 ? "on" : ""}">${esc(c.key)} ${Math.round(c.p * 100)} %</span>`).join("")}</div>` +
-      `<details class="why"><summary>what voted</summary>${votes.map(esc).join("<br>")}</details>`);
+      (k.corrected ? "" : `<div class="chips">${(k.candidates || []).map((c, i) => `<span class="chip ${i === 0 ? "on" : ""}">${esc(c.key)} ${Math.round(c.p * 100)} %</span>`).join("")}</div>`) +
+      (borrowed.length ? `<details class="why"><summary>borrowed chords</summary>${borrowed.map(esc).join("<br>")}</details>` : "") +
+      `<details class="why"><summary>what voted</summary>${votes.map(esc).join("<br>")}</details>` +
+      (a.status === "done" ? keyFixForm(k) : ""));
+    wireKeyFix(el, a, st);
   }
   if (a.tempo?.display) {
     const t = a.tempo;
@@ -209,6 +217,33 @@ function render(el, a, st) {
   }
 }
 
+// "Key is wrong?": pick the right key; the server shows it for this song from now on and keeps it to retrain the key model
+const FIX_MODES = [["major", "Major"], ["minor", "Minor"], ["dorian", "Dorian"], ["phrygian", "Phrygian"], ["lydian", "Lydian"],
+  ["mixolydian", "Mixolydian"], ["locrian", "Locrian"], ["harmonic_minor", "Harmonic Minor"], ["melodic_minor", "Melodic Minor"],
+  ["phrygian_dominant", "Phrygian Dominant"], ["harmonic_major", "Harmonic Major"], ["lydian_dominant", "Lydian Dominant"],
+  ["hungarian_minor", "Hungarian Minor"]];
+function keyFixForm(k) {
+  const t = k.tonic || "C", m = (k.mode || k.scale || "major").toLowerCase().replace(/ /g, "_");
+  return `<details class="why fixkey"><summary>${k.corrected ? "change correction" : "key is wrong?"}</summary>
+    <form class="fixkey"><label class="small">It's actually
+      <select name="tonic">${ROOTS.map((r) => `<option ${r === t ? "selected" : ""}>${r}</option>`).join("")}</select>
+      <select name="mode">${FIX_MODES.map(([v, n]) => `<option value="${v}" ${v === m ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      <input name="comment" class="small" placeholder="note (optional)" maxlength="300">
+      <button class="primary small">Save</button> <span class="small muted msg"></span></form></details>`;
+}
+function wireKeyFix(el, a, st) {
+  const f = $('[data-t="key"] form.fixkey', el);
+  if (!f) return;
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const name = FIX_MODES.find(([v]) => v === f.mode.value)[1];
+    try {
+      const fixed = await api.correctKey(a.id, `${f.tonic.value} ${name}`, f.comment.value || null);
+      render(el, fixed, st);
+    } catch (err) { $(".msg", f).textContent = err.message || String(err); }
+  };
+}
+
 function wireActions(el, a) {
   $(".actions", el).onclick = async (e) => {
     const w = e.target.dataset.a;
@@ -223,7 +258,7 @@ function wireActions(el, a) {
       Object.assign(document.createElement("a"), { href: url, download: `${a.track?.title || "chords"}.${w === "midi" ? "mid" : "cho"}` }).click();
     }
     if (w === "fb") {
-      const field = prompt("Which value is wrong? (key, bpm, detune, signature, chords, other)", "key");
+      const field = prompt("Which value is wrong? (bpm, detune, signature, chords, other; for the key use \"key is wrong?\" on the key tile)", "bpm");
       const correct = field && prompt(`Correct ${field}:`);
       if (correct) { await api.feedback(a.id, field, correct); flash("Thanks"); }
     }

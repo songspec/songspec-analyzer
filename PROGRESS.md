@@ -117,3 +117,21 @@ Waiting on the user (no work is blocked by these, but they decide the next accur
 - `tools/fetch_third_party.py` fetches both at the pinned commits (the Dockerfile runs it). Engine 0.3.0.
 - Progressions now use every chord in a bar (a bar holding Gb Ab Bbm used to read as just "Gb").
 - Known weak spot: relative major / minor on IV-V-vi / VI-VII-i loops (e.g. *Power 4* reads Db Major, tracker Bb minor).
+
+## "May borrow from" and key corrections (2026-10-26, engine 0.4.0)
+
+- **May borrow from**: `key.borrows` + the key note (`May borrow from C Mixolydian, C Minor`; after a mode `D Dorian - May borrow
+  from D Mixolydian`). Outside chords are credited to the closest scale on the key's tonic: every church mode, parallel Major/Minor,
+  Harmonic / Melodic Minor, Phrygian Dominant, Harmonic Major, Lydian Dominant, Hungarian Minor, and the relative minor's Harmonic
+  Minor (the tracker's "Bb Major ... borrows from G Harmonic Minor"). Against the tracker's notes: 43 % hits, 48 % precision
+  (`eval/REPORT.md` 3.7), hence "may". In key sections, only chords in the main key count.
+- **Key corrections**: `client.correctKey(id, "A# Phrygian")` / `POST .../feedback {field: "key"}` (validated, `GET /v1/keys` for a
+  picker). Shown for every later view of the same song (file hash, fingerprint, ISRC, cached copies, links), with `key.corrected`
+  keeping the detected key; roman numerals, borrows and the detune sentence follow the correction. The test page has a "key is
+  wrong?" picker (tonic + 13 modes).
+- **Learning from corrections**: each analysis stores the key fusion's inputs (`key_evidence` table, numbers only).
+  `eval/key_retrain.py --db <analyzer.sqlite3> [--install]` retrains with corrections (installed configuration held fixed) and installs
+  only with >= 20 corrected songs that it gets better on held-out, no loss on the tracker songs, and a win over the best single
+  estimator. No corrections collected yet; Qo's `data/analyzer.sqlite3` is where
+  they will come from.
+- Mode table gained Melodic Minor, Harmonic Major, Lydian Dominant, Hungarian Minor (parsing, display, borrows, corrections).

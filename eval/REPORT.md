@@ -185,6 +185,31 @@ S-KEY alone: better on 12 songs, worse on 14; the MIREX gain comes from turning 
 (exact 41.8 -> 46.1 %). S-KEY is the clear win over Centsible (+0.03 MIREX) and, unlike Centsible, never saw these songs. Without
 S-KEY on a server the key stage falls back to Centsible's key.
 
+### 3.7 "May borrow from" (`eval/key_borrow.py`, `service/.../key/borrow.py`, 2026-10-26)
+
+The tracker's notes name borrowed scales in free text on about 1 560 of its rows ("Borrows heavily from F Harmonic Minor",
+"Might borrow from D Mixolydian"). On the 131 single-key labelled songs with chord evidence, borrow detection runs relative to the
+tracker's own key (so key errors are not counted) and is compared with every "<tonic> <scale>" the note mentions:
+
+| songs | n | we name at least one of the note's scales | share of our names the note mentions |
+|---|---|---|---|
+| note names a scale | 35 | 43 % | 48 % |
+| note names none | 96 | we name one in 29 % | - |
+
+What changed the numbers: ignoring chords on the key's root (the recogniser flips the tonic major/minor when the beat has no 3rd:
+29 % -> 49 % hits, 22 % -> 40 % precision), then the thresholds (MIN_SHARE 0.04 -> 0.10: 49 -> 43 % hits, 40 -> 48 % precision,
+29 % instead of 42 % of silent songs flagged). Those two settings were chosen on these same 35 songs, so the numbers are optimistic;
+a silent note is not proof of no borrowing, so the 29 % is an upper bound on false alarms. The service words it "May borrow from".
+
+### 3.8 User corrections and retraining (`eval/key_retrain.py`)
+
+Every analysis stores the key fusion's inputs (numbers only) and users can correct the key. `key_retrain.py` adds the corrected
+songs to the tracker songs and cross-validates twice by group on all held-out songs with the installed configuration held fixed:
+trained on tracker songs only vs with corrections. (Re-choosing the configuration is too noisy for this: in a smoke test one added
+song re-chose configurations and moved the tracker songs' score 0.601 -> 0.621 by chance.) It installs only with >= 20 corrected
+songs, a better score on them, no loss on the tracker songs (0.005 slack) and a win over the best single estimator. No real
+corrections exist yet (tester builds collect them in data/analyzer.sqlite3).
+
 ## 4. Chords with BTC (approved by the user, 2026-10-26; `eval/chord_blend.py`)
 BTC (large vocabulary, 170 chords) runs on the tuning-corrected CQT and its per-frame probabilities are blended per beat with the
 template evidence before the same beat-synchronous Viterbi. No chord labels exist for the catalog, so the yardstick is a proxy: the

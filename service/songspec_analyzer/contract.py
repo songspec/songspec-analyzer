@@ -126,9 +126,27 @@ class KeySection(_M):
     display: Optional[str] = Field(None, description="house style, e.g. 'C Minor*'")
 
 
+class KeyBorrow(_M):
+    from_: str = Field(alias="from", description="house style, e.g. 'C Mixolydian', 'C Minor', 'A Harmonic Minor'")
+    tonic: str = Field(description="'C'")
+    mode: str = Field(description="scale id: 'mixolydian', 'aeolian', 'harmonic_minor', 'phrygian', ...")
+    chords: List[str] = Field(default_factory=list, description="the outside chords it explains, longest first: ['Bb', 'Bb7']")
+    seconds: float = Field(description="how long those chords are held in total")
+    share: float = Field(description="that time as a share of the song's chord time, 0..1")
+
+
+class KeyCorrection(_M):
+    key: str = Field(description="the corrected key in house style, 'Bb Minor*'")
+    value: str = Field(description="what the user picked, 'A# Phrygian'")
+    at: Optional[float] = Field(None, description="unix time of the correction")
+    by: Optional[str] = Field(None, description="the X-SongSpec-User header sent with it, if any")
+    detected: dict = Field(default_factory=dict, description="the analyzer's own key fields before the correction")
+
+
 class KeyDisplay(_M):
     key: Optional[str] = Field(None, description="'Bb Minor*', 'C Minor* / C Major'")
-    note: Optional[str] = Field(None, description="'A# Phrygian', 'Intro in C Phrygian Dominant, Verses & Choruses in C Major'")
+    note: Optional[str] = Field(None, description="'A# Phrygian', 'Intro in C Phrygian Dominant, Verses & Choruses in C Major', "
+                                "'D Dorian - May borrow from D Mixolydian'")
     ambiguity_text: Optional[str] = Field(None, description="'ambiguous between C Major and A Minor' when confidence is low")
 
 
@@ -143,6 +161,10 @@ class Key(_M):
     candidates: List[KeyCandidate] = Field(default_factory=list, description="top 3")
     sections: List[KeySection] = Field(default_factory=list)
     modulations: List[dict] = Field(default_factory=list, description="[{t, from, to, kind}] e.g. kind 'half-step lift'")
+    borrows: List[KeyBorrow] = Field(default_factory=list, description="'May borrow from': outside chords traced to the scale they "
+                                     "come from (parallel modes, harmonic/melodic minor, the relative minor's harmonic minor)")
+    corrected: Optional[KeyCorrection] = Field(None, description="set when a user corrected the key; the other fields then show "
+                                               "the corrected key")
     estimators: Dict[str, dict] = Field(default_factory=dict, description="each estimator's top key and probability")
     metadata: Dict[str, dict] = Field(default_factory=dict, description="{'hooktheory': {key, bpm, url, agrees}}")
     preliminary: bool = Field(False, description="true while only the quick key exists (Centsible's detector); the fused key replaces it")

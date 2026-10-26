@@ -50,7 +50,8 @@ Auth options: (a) put the service behind your backend and call it server-to-serv
 | `GET` | `/v1/analyses/{id}` | the current view (partial while running) |
 | `GET` | `/v1/analyses/{id}/events` | SSE: `update` (full view on every change), then `done` or `error` |
 | `GET` | `/v1/analyses/{id}/exports/{fmt}` | `json`, `csv`, `tracker-row` now; `midi`, `chordpro`, `txt` with the chord milestone. `?transpose=N&simplify=1` |
-| `POST` | `/v1/analyses/{id}/feedback` | `{"field": "key"|"bpm"|"detune"|"signature"|"chords"|"other", "correct": "Bb Minor", "comment": "..."}` |
+| `POST` | `/v1/analyses/{id}/feedback` | `{"field": "key"|"bpm"|"detune"|"signature"|"chords"|"other", "correct": "Bb Minor", "comment": "..."}`. For `key`, `correct` must be a key (`422 bad_key` otherwise) and the response's `analysis` is the result with the correction applied |
+| `GET` | `/v1/keys` | every key a correction can name, for a picker: `[{value: "A Dorian", key: "A Minor*", tonic, mode, minor}]` |
 | `POST` | `/v1/fix-bpm` | **Fix BPM**: multipart `file` + `options` JSON (`target_bpm`, `signature`, `bpm_mode`, `format`, `keep_edges`, `loudness`) → BPM Fixer's own engine (Rubber Band R3) makes the song run at one tempo. `GET /v1/fix-bpm/{id}` = status, the stretch report and BPM Fixer's verification; `GET /v1/fix-bpm/{id}/download` = `name_fixed_XXXbpm.mp3`, kept 24 h for whoever holds the id. Needs Rubber Band on the server (`SONGSPEC_RUBBERBAND`, `rubberband-r3`/`rubberband` on PATH; the Docker image: `apt-get install rubberband-cli`); `501 fix_unavailable` otherwise. Rubber Band is GPL: it runs server-side only. |
 | `GET` | `/v1/match?a=<id>&b=<id>` | mashup helper: how to make song b sit on song a (semitones, cents, tempo ratio incl. half/double time, Camelot before/after, ready-made `display` strings) |
 | `GET` | `/v1/version`, `/v1/health`, `/v1/schema` | engine/schema version, accepted formats, limits; liveness; the JSON Schema |
@@ -86,7 +87,9 @@ await analyzer.analyzeLink("https://open.spotify.com/track/...", { onUpdate });
 // exports / feedback
 location.href = analyzer.exportUrl(result.id, "midi", { transpose: -2 });
 navigator.clipboard.writeText(trackerRowFor(result));
-await analyzer.feedback(result.id, "key", "Bb Minor");
+await analyzer.feedback(result.id, "bpm", "140");
+const fixed = await analyzer.correctKey(result.id, "A# Phrygian");   // "the key is wrong, it's actually ___"
+const picker = await analyzer.keys();                                 // [{value: "A Dorian", key: "A Minor*", ...}] for a dropdown
 ```
 `watch()` reads the SSE stream through `fetch` (so headers work) and falls back to polling when a proxy buffers SSE. Errors are `AnalyzerError {status, code, message, retryAfter}`.
 
@@ -114,6 +117,8 @@ What the product brief asks the page to offer, as *suggestions* (your design dec
 | Chord summary, progressions, simplify, transpose | `chords.summary`, `chords.progressions[].display`, `segment.triad`, `transposeChord()` |
 | Preview-based warning (link input) | `warnings[]`, `track.source` ends in `-preview` |
 | "This is wrong" button | `POST …/feedback` |
+| "Key is wrong?" picker (tonic + mode) | `client.keys()`, `client.correctKey(id, "A Dorian")`; show `key.corrected` ("corrected · detected Bb Minor") |
+| "May borrow from" | already in `key.display.note`; details per scale in `key.borrows` (which chords, how long) |
 
 ### Tempo fields
 `tempo.display.bpm` is the string to show. It follows the conventions of SongSpec's own BPM & Key tracker:
@@ -131,6 +136,10 @@ What the product brief asks the page to offer, as *suggestions* (your design dec
 
 ### Key fields
 `key.display.key` is the house-style key (`Bb Minor`, `Bb Minor*` for a mode, `C Minor* / C Major` when sections differ); `key.display.note` explains it (`Bb Phrygian`, `0:00-0:32 in C Phrygian Dominant, 0:32-3:30 in C Major`). `key.preliminary` is `true` while only the quick key exists (seconds after upload); the fused key replaces it. `key.confidence` is the top key's probability; when it is low, `key.ambiguous` is true and `key.display.ambiguity_text` says "ambiguous between C Major and A Minor". `key.candidates` is the top 3 (for a popover), `key.estimators` what each method voted, `key.sections` / `key.modulations` the key changes (e.g. `{"kind": "half-step lift"}`), `key.camelot` / `key.open_key` the DJ notations.
+
+**May borrow from.** `key.borrows` lists the scales the song's outside chords come from, strongest first: `[{"from": "C Mixolydian", "tonic": "C", "mode": "mixolydian", "chords": ["Bb", "Bb7"], "seconds": 31.2, "share": 0.14}]`, and `key.display.note` says it the tracker's way: `May borrow from C Mixolydian, C Minor`, or after a mode `D Dorian - May borrow from D Mixolydian`. Each chord with a note outside the key is credited to the closest scale on the same tonic that holds all its notes (Mixolydian, Lydian, Dorian, Phrygian, Locrian, the parallel Major/Minor, Harmonic / Melodic Minor, Phrygian Dominant, Harmonic Major, Lydian Dominant, Hungarian Minor), or in a major key to the relative minor's Harmonic Minor (E7 in C Major: "A Harmonic Minor"). Only chords held a while count, and chords on the key's own root are ignored (beats often leave out the 3rd, so the tonic flips major/minor). It is measured against the tracker's notes in `eval/REPORT.md` 3.7: right about half the time, so it is worded "may".
+
+**Corrections.** When a user says the key is wrong (`correctKey` / `POST …/feedback` with `field: "key"`), every later view of that song (the same analysis, a re-upload of the same file or audio, a link matched to it) shows the corrected key: `tonic`, `scale`, `mode`, `camelot`, `open_key`, `display`, `borrows`, the chord roman numerals and the detune sentence all follow it, and `key.corrected` = `{key, value, at, by, detected}` keeps what the analyzer had said. The latest correction wins. Each analysis also stores what the key model saw (numbers only, no audio), so `eval/key_retrain.py --db <analyzer.sqlite3>` can retrain the key model from collected corrections; it installs a new model only when that beats the current one on held-out songs.
 
 ### Chord fields
 `chords.segments[]`: `start`, `end` (seconds), `chord` (`Bbm`, `Gbmaj7`, `C/E`, `N` = no chord), `triad` (for a "simplify" toggle), `roman` (relative to the key: `i`, `VI`, `♭VII`), `bass`, `conf` (0..1), `on_downbeat`. Chord changes are aligned to the beat grid. `chords.summary` lists every chord with its total seconds and count; `chords.progressions` the repeating loops (`{"roman": "i-VI-III-VII", "chords": "Bbm-Gb-Db-Ab", "count": 8, "display": "i–VI–III–VII ×8"}`). Transpose / simplify on the client: `transformChord(name, n, simplify)`; exports in the browser: `midi(analysis, {transpose})` (a `Uint8Array`, chords on the song's own beat grid with a tempo map, so it lines up with the audio in a DAW), `chordpro()`, `txt()`, `progressionText()`. Byte-identical to the server's `/exports/{midi|chordpro|txt}`.

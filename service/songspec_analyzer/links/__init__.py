@@ -37,4 +37,4 @@ async def resolve_and_fetch(url, options, store, queue, settings):
     res["track"] = {**res.get("track", {}), **{k: v for k, v in track.items() if v}, "source": "upload"}
     store.update(aid, status="done", result=res, stages=hit["stages"], cached_from=hit["id"], fingerprint=hit["fingerprint"],
                  duration=hit["duration"])
-    return public_view(store.get(aid))
+    return public_view(store.get(aid), store)
