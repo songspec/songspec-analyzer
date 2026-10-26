@@ -127,6 +127,12 @@ def stage(ctx):
     y22 = librosa.resample(a.mono, orig_sr=a.sr, target_sr=22050)
     est = E.estimator_pool(ck["key_prob"], g, ck["chroma_scale"], E.naive_chroma(y22))
     model = load_model()
+    if model is not None and "skey" in model.names:
+        if E.skey_available():
+            from ..tempo.engine import device
+            est["skey"] = E.skey_probs(a.mono, a.sr, device())
+        else:                                            # the model needs S-KEY: without it, fall back to Centsible's key
+            model = None
     prev = ctx.store.get(ctx.aid)["result"].get("key") or {}
     if model is not None:
         tie = candidate_features(ck["chroma_scale"], ck["chroma_bass"], seq)
@@ -135,7 +141,7 @@ def stage(ctx):
         source = "fusion"
     else:
         p = est["centsible"]
-        source = "centsible (no fusion model installed)"
+        source = "centsible (no fusion model, or S-KEY not installed)"
     order = np.argsort(-p)[:3]
     top = int(order[0])
     tonic, minor = top % 12, top >= 12
@@ -169,6 +175,9 @@ def stage(ctx):
     for n in ("temperley2005@scale", "albrecht_shanahan@scale", "albrecht_shanahan@beat", "krumhansl@beat", "edma@naive"):
         i = int(np.argmax(est[n]))
         estimators[n] = {"key": KEY_NAMES[i], "p": round(float(est[n][i]), 3)}
+    if "skey" in est:
+        i = int(np.argmax(est["skey"]))
+        estimators["skey"] = {"key": KEY_NAMES[i], "p": round(float(est["skey"][i]), 3)}
     estimators["fusion"] = {"key": KEY_NAMES[top], "p": round(float(p[top]), 3), "source": source}
     out = {"key": {
         "tonic": FLAT_NAMES[tonic], "scale": "minor" if minor else "major",

@@ -5,7 +5,7 @@
 FROM python:3.12-slim
 
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools rubberband-cli build-essential cmake \
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools rubberband-cli build-essential cmake git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -17,9 +17,10 @@ COPY contract contract
 COPY client client
 COPY demo demo
 COPY tools tools
-RUN pip install --no-cache-dir -e "service[redis]" \
+RUN pip install --no-cache-dir -e "service[redis]" nnAudio==0.3.3 pyyaml \
     && python tools/build_native.py \
-    && rm -rf build
+    && rm -rf build \
+    && python tools/fetch_third_party.py       # S-KEY and BTC at pinned commits, weights checked by SHA-256 (optional models)
 # model weights: mounted into /app/service/models (compose.yaml), or baked in at build time when the build has network access:
 #   RUN python tools/fetch_models.py
 ENV SONGSPEC_DATA_DIR=/data OMP_NUM_THREADS=4

@@ -138,11 +138,13 @@ def _smooth_bass(beat_bass, path):
     return out
 
 
-def recognise(yh, tuning_cents, beats, downbeats, duration, vocab="full"):
-    """-> list of segments {start, end, chord, triad, root, quality, bass, conf, on_downbeat}."""
+BTC_WEIGHT = 0.25     # share of BTC's evidence (eval/chord_blend.py: chord-derived key 0.426 -> 0.480); 0 = templates only
+BTC_SCALE = 3.0       # log-probabilities of BTC are on a smaller scale than the template scores
+
+
+def evidence(yh, tuning_cents, beats, downbeats, duration, vocab="full"):
+    """Everything the decoder needs, per beat: dict(labs, logp K x B (templates), post, bb (bass chroma), starts, end, is_down)."""
     beats = np.asarray(beats, float)
-    if len(beats) < 4:
-        return []
     treble, bass, energy = cqt_chromas(yh, tuning_cents)
     edges = np.concatenate([beats, [min(duration, beats[-1] + np.median(np.diff(beats)))]])
     tb, fr = beat_sync(treble, edges, treble.shape[1])
@@ -155,6 +157,27 @@ def recognise(yh, tuning_cents, beats, downbeats, duration, vocab="full"):
     labs, logp, post = emissions(tb, bb, eb, vocab)
     db = np.asarray(downbeats if downbeats is not None else [], float)
     is_down = np.array([db.size > 0 and np.min(np.abs(db - s)) < 0.1 for s in starts])
+    return {"labs": labs, "logp": logp, "post": post, "bb": bb, "starts": starts, "end": edges[-1], "is_down": is_down}
+
+
+def btc_beat_logp(times, P, starts, end):
+    """BTC's frame probabilities averaged per beat -> K x B log-probabilities in our vocabulary."""
+    edges = np.append(starts, end)
+    out = np.zeros((P.shape[1], len(starts)))
+    for b in range(len(starts)):
+        sel = (times >= edges[b]) & (times < edges[b + 1])
+        q = P[sel].mean(axis=0) if sel.any() else P[min(np.searchsorted(times, edges[b]), len(P) - 1)]
+        out[:, b] = np.log(q + 1e-4)
+    return out
+
+
+def decode(ev, btc_logp=None, btc_weight=None):
+    """Viterbi over beats on the template evidence, blended with BTC's when given -> segments."""
+    labs, bb, starts, is_down = ev["labs"], ev["bb"], ev["starts"], ev["is_down"]
+    w = BTC_WEIGHT if btc_weight is None else btc_weight
+    logp = ev["logp"] if btc_logp is None or w <= 0 else (1 - w) * ev["logp"] + w * BTC_SCALE * btc_logp
+    post = np.exp(logp - logp.max(axis=0, keepdims=True))
+    post /= post.sum(axis=0, keepdims=True)
     path = viterbi(logp, is_down)
     # the bass of every beat (an inversion is part of the label, so C then C/E are two segments)
     beat_bass = []
@@ -172,10 +195,20 @@ def recognise(yh, tuning_cents, beats, downbeats, duration, vocab="full"):
         root, q = split(lab)
         bs = beat_bass[i]
         name = lab if bs is None else f"{lab}/{FLAT[bs]}"
-        end = starts[j + 1] if j + 1 < len(starts) else edges[-1]
+        end = starts[j + 1] if j + 1 < len(starts) else ev["end"]
         segs.append({"start": round(float(starts[i]), 3), "end": round(float(end), 3), "chord": name,
                      "triad": "N" if root is None else FLAT[root] + TRIAD_OF[q], "root": root, "quality": q,
                      "bass": None if root is None else FLAT[bs if bs is not None else root],
                      "conf": round(float(post[path[i], i:j + 1].mean()), 3), "on_downbeat": bool(is_down[i])})
         i = j + 1
     return segs
+
+
+def recognise(yh, tuning_cents, beats, downbeats, duration, vocab="full", btc=None, btc_weight=None):
+    """-> list of segments {start, end, chord, triad, root, quality, bass, conf, on_downbeat}.
+    btc: (frame times, frame probabilities) from chords/btc.py, blended into the evidence when given."""
+    if len(np.asarray(beats)) < 4:
+        return []
+    ev = evidence(yh, tuning_cents, beats, downbeats, duration, vocab)
+    bl = btc_beat_logp(btc[0], btc[1], ev["starts"], ev["end"]) if btc is not None else None
+    return decode(ev, bl, btc_weight)

@@ -28,6 +28,9 @@ from songspec_analyzer.key.profiles import PROFILES
 
 MODEL = ROOT / "service" / "songspec_analyzer" / "key" / "fusion_model.json"
 SETS = {"centsible": ["centsible"],
+        "skey": ["skey"],
+        "centsible+skey": ["centsible", "skey"],
+        "centsible+skey+AS": ["centsible", "skey", "albrecht_shanahan@scale", "albrecht_shanahan@beat"],
         "centsible+AS": ["centsible", "albrecht_shanahan@scale", "albrecht_shanahan@beat"],
         "centsible+6": ["centsible", "albrecht_shanahan@scale", "albrecht_shanahan@beat", "krumhansl@beat", "krumhansl@naive",
                         "edma@naive"],
@@ -44,6 +47,10 @@ def load():
         f = json.loads(p.read_text(encoding="utf-8"))
         chroma_log = E.global_chroma(f["chroma_beat_seq"])
         est = E.estimator_pool(f["centsible"], chroma_log, f["chroma_scale"], f["chroma_naive"])
+        sk = cache_path("skey_v1", r["file"])
+        if not sk.exists():
+            continue                                    # every song needs every estimator (the fusion compares like with like)
+        est["skey"] = np.asarray(json.loads(sk.read_text(encoding="utf-8"))["p"])
         tie = candidate_features(f["chroma_scale"], f["chroma_bass"], f.get("chroma_beat_seq"))
         cp = cache_path("chords_v1", r["file"])
         ch = json.loads(cp.read_text(encoding="utf-8")) if cp.exists() else {"segments": [], "duration": None}

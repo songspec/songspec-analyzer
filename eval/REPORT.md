@@ -169,3 +169,36 @@ first / last chord, cadences into the tonic (incl. minor v -> i).
   the template chord engine on dense real mixes than about the idea (BTC would be the test; it waits for approval to run).
 - As fusion features (nested CV now also chooses none / tiebreak / chords / both): fusion **0.549** again, vs Centsible 0.564
   (better on 6 songs, worse on 9). The inner CV picks the chord features for one group of five. **Gate still not passed.**
+
+### 3.6 S-KEY and the fusion that ships (approved by the user, 2026-10-26)
+S-KEY (Deezer, ICASSP 2025; self-supervised, never trained on the catalog) on the same 165 songs, then the nested-CV fusion again
+with S-KEY in the estimator pool (`eval/skey_feat.py`, `eval/key_fusion.py`):
+
+| estimator | MIREX | exact | fifth | relative | parallel | other |
+|---|---|---|---|---|---|---|
+| **fusion** (nested CV; ships as Centsible + S-KEY + Albrecht-Shanahan on two chromas) | **0.601** | **46.1 %** | 26 | 32 | 3 | 28 |
+| S-KEY alone | 0.596 | 41.8 % | 39 | 32 | 1 | 24 |
+| Centsible's detector alone | 0.564 | 45.5 % | 20 | 22 | 7 | 41 |
+
+**Gate passed** (0.601 > 0.596): the fusion model is installed (`service/.../key/fusion_model.json`). Honest size of the gain over
+S-KEY alone: better on 12 songs, worse on 14; the MIREX gain comes from turning S-KEY's fifth errors into exact or relative answers
+(exact 41.8 -> 46.1 %). S-KEY is the clear win over Centsible (+0.03 MIREX) and, unlike Centsible, never saw these songs. Without
+S-KEY on a server the key stage falls back to Centsible's key.
+
+## 4. Chords with BTC (approved by the user, 2026-10-26; `eval/chord_blend.py`)
+BTC (large vocabulary, 170 chords) runs on the tuning-corrected CQT and its per-frame probabilities are blended per beat with the
+template evidence before the same beat-synchronous Viterbi. No chord labels exist for the catalog, so the yardstick is a proxy: the
+key derived from the recognised chords against the tracker's key (164 songs).
+
+| BTC weight | chord-derived key MIREX | exact | chord changes / minute |
+|---|---|---|---|
+| 0 (templates only) | 0.426 | 27.4 % | 19 |
+| **0.25 (shipped)** | **0.480** | **35.4 %** | 21 |
+| 0.5 | 0.478 | 34.1 % | 22 |
+| 1.0 (BTC only) | 0.457 | 31.1 % | 24 |
+
+The blend beats both sources alone; the weight was chosen on all songs via the proxy. BTC on the GPU adds ~1-4 s per song.
+
+Example (*Power 4*, tracker: Bb minor, 153 BPM): chords Gb - Ab - Bbm repeating, progression "IV-V-vi x7". The fused key says
+**Db Major**, the relative major (S-KEY and four profiles vote Db Major, Centsible Bb Minor): the classic relative confusion the
+fusion still makes on loops that are IV-V-vi in one key and VI-VII-i in the other.

@@ -13,14 +13,15 @@ Status per component: **ship** = verified and fine to serve; **eval only** = use
 | PyTorch 2.14.1 | models | BSD-3 | PyPI | ship |
 | pybind11 | binding | BSD-3 | PyPI | ship |
 | Key profiles (`key/profiles.py`) | key | numbers from published papers, copied from Essentia's `key.cpp` and justkeydding's `keyprofile.cc` (MIT); data, cited per profile | 2026-10-26 | ship |
-| S-KEY (Deezer, `third_party/skey`) | key (planned) | code MIT; weights `skey.pt` (SHA-256 `78dfd0ad…5ead4`) ship inside the MIT repo, no separate weights licence stated | github.com/deezer/skey @ `918b83d`, 2026-10-26 | **pending your approval to run downloaded code** |
+| S-KEY (Deezer, `third_party/skey`) | key (fusion input) | code MIT; weights `skey.pt` (SHA-256 `78dfd0ad…5ead4`) ship inside the MIT repo, no separate weights licence stated | github.com/deezer/skey @ `918b83d`, 2026-10-26 | ship (approved by the user 2026-10-26; weights loaded with `weights_only=True`) |
+| BTC (Park et al., `third_party/btc`) | chords (blended with the templates) | MIT (code); weights `btc_model_large_voca.pt` (SHA-256 `1673d23f…ab51`) ship inside the MIT repo | github.com/jayg996/BTC-ISMIR19 @ `2682317`, 2026-10-26 | ship (approved by the user 2026-10-26; `weights_only=True`) |
 | nnAudio 0.3.3 | S-KEY's CQT | MIT | PyPI | ship (with S-KEY) |
 | Rubber Band (`rubberband-r3.exe` from BPM Fixer) | evaluation (pitch-shift test set); optional Fix BPM | GPL-2.0-or-later | – | eval only; server-side only if Fix BPM ships |
 | Essentia | baseline | AGPL-3.0 | – | eval only (not installed: no Windows wheel) |
 | madmom models | baseline | CC BY-NC-SA | – | eval only, not installed |
 | key-cnn (Schreiber) | baseline | to verify (likely AGPL-3.0) | – | not used yet |
 | Demucs | stems | MIT | – | not used yet |
-| BTC, Chordino | chords | to verify | – | not used yet |
+| Chordino / NNLS-Chroma | chords | GPL-2.0 Vamp plugin | – | not used (BTC + templates instead) |
 | chromaprint (`fpcalc`) | fingerprint cache | LGPL-2.1 (separate executable) | – | ship (Docker image) |
 
 ## Streaming services (link input)

@@ -103,10 +103,17 @@ def _skey_load(device):
     sys.path.insert(0, str(ROOT / "third_party" / "skey"))
     from skey.key_detection import key_map, load_model_components
     ckpt_path = ROOT / "third_party" / "skey" / "skey" / "models" / "skey.pt"
+    # weights_only=True: no arbitrary pickle code. The checkpoint stores a few numpy scalars (its config), so exactly those numpy
+    # types are allow-listed; anything else in the file would still be refused.
+    from numpy._core import multiarray
+    # the file was written with numpy 1.x, which kept `scalar` in numpy.core (numpy 2: numpy._core): register it under the old name
+    safe = [(multiarray.scalar, "numpy.core.multiarray.scalar"), np.dtype] + \
+        [type(np.dtype(t)) for t in ("float64", "float32", "int64", "int32", "bool")]
     try:
-        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)      # no arbitrary pickle code
-    except Exception:
-        raise RuntimeError("S-KEY checkpoint does not load with weights_only=True; refusing to unpickle it")
+        with torch.serialization.safe_globals(safe):
+            ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+    except Exception as e:
+        raise RuntimeError(f"S-KEY checkpoint does not load with weights_only=True; refusing to unpickle it ({str(e)[-200:]})")
     hcqt, chromanet, crop = load_model_components(ckpt, torch.device(device))
     from ..display.key import parse_key
     index = []
@@ -129,9 +136,9 @@ def skey_probs(y, sr, device="cpu"):
     if m > 0:
         x = x / m
     with torch.no_grad():
-        logits = chromanet(crop(hcqt(x.unsqueeze(0).to(dev)), torch.zeros(1).to(dev)))
-        lg = torch.mean(logits, dim=0).cpu().numpy().ravel()
-    p_theirs = softmax(lg)
+        probs = chromanet(crop(hcqt(x.unsqueeze(0).to(dev)), torch.zeros(1).to(dev)))   # ChromaNet ends in a softmax
+        pm = torch.mean(probs, dim=0).cpu().numpy().ravel()
+    p_theirs = pm / pm.sum()
     out = np.zeros(24)
     out[index] = p_theirs
     return out

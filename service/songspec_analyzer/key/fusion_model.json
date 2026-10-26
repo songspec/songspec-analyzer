@@ -1,0 +1,31 @@
+{
+ "names": [
+  "centsible",
+  "skey",
+  "albrecht_shanahan@scale",
+  "albrecht_shanahan@beat"
+ ],
+ "l2": 0.3,
+ "use_features": false,
+ "feature_kind": "none",
+ "features": [
+  "bass_tonic",
+  "bass_fifth",
+  "leading_tone",
+  "third",
+  "triad",
+  "ends"
+ ],
+ "w": [
+  0.228379,
+  0.353365,
+  0.031957,
+  0.201083,
+  0.007031
+ ],
+ "trained": "2026-10-26",
+ "songs": 165,
+ "nested_cv_mirex": 0.6012,
+ "best_single": "skey",
+ "best_single_mirex": 0.5958
+}

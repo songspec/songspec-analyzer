@@ -8,8 +8,8 @@ Plan: `PLAN.md`. Integration guide for SongSpec's main dev: `INTEGRATION.md`.
 | 2 | Tempo: BPM Fixer port, Beat This!, house BPM rule | **done** (2026-10-25), see below; >95 % target **not met** (86 %) |
 | 3 | Detune: Centsible pybind11 binding + cross-checks | **done** (2026-10-26), see below |
 | 4 | Key v1 + eval harness + baselines | **done** (2026-10-26) |
-| 5 | Chords | **v1 done** (own engine, exports); real-music accuracy unmeasured (no chord labels); BTC waits for approval |
-| 6 | Key v2 (fusion, modes, sections) | built; **fusion gate not passed** (0.549 vs Centsible 0.564), Centsible's key ships |
+| 5 | Chords | **done**: BTC + templates (weight 0.25), exports; real-music accuracy only by proxy (no chord labels) |
+| 6 | Key v2 (fusion, modes, sections) | **done**: with S-KEY the fusion passes the gate (0.601 vs S-KEY 0.596, Centsible 0.564) and ships |
 | 7 | Link input + Hooktheory | links -> metadata -> earlier uploads done; previews blocked by API terms; Hooktheory waits for credentials |
 | 8 | Polish, Docker, final INTEGRATION.md | |
 | 9 | Optional: Fix BPM, mashup helper | mashup helper done; Fix BPM not started |
@@ -106,3 +106,14 @@ Waiting on the user (no work is blocked by these, but they decide the next accur
 2. Preview analysis vs Apple's / Deezer's terms (SongSpec's legal call).
 3. Hooktheory credentials; a Spotify developer app (optional).
 4. Labelled songs Centsible never saw, or chord annotations, for fair key / chord numbers.
+
+## S-KEY and BTC (2026-10-26, approved by the user)
+
+- S-KEY (Deezer) runs from `third_party/skey` (pinned commit, weights by SHA-256, loaded with `weights_only=True` plus an allow-list of
+  the numpy types its checkpoint stores). Alone 0.596 MIREX on the 165 songs; the nested-CV fusion (Centsible + S-KEY + Albrecht-
+  Shanahan x2) 0.601 / 46.1 % exact passes the gate and is installed. Without S-KEY a server falls back to Centsible's key.
+- BTC runs from `third_party/btc` (pinned, SHA-256, `weights_only=True`; a one-line `np.float` alias for its 2019 code). Its
+  probabilities are blended with the template evidence (weight 0.25): chord-derived key 0.426 -> 0.480 on the proxy.
+- `tools/fetch_third_party.py` fetches both at the pinned commits (the Dockerfile runs it). Engine 0.3.0.
+- Progressions now use every chord in a bar (a bar holding Gb Ab Bbm used to read as just "Gb").
+- Known weak spot: relative major / minor on IV-V-vi / VI-VII-i loops (e.g. *Power 4* reads Db Major, tracker Bb minor).
