@@ -117,3 +117,12 @@ export declare function transposeChord(name: string, semitones: number): string;
 export declare function simplifyChord(name: string): string;
 export declare function trackerRow(song: string, bpm: string, key: string, notes: (string | null | undefined)[]): string;
 export declare function trackerRowFor(analysis: Analysis): string;
+
+// ---- chord exports in the browser (byte-identical to GET /v1/analyses/{id}/exports/{midi|chordpro|txt})
+export interface ExportOptions { transpose?: number; simplify?: boolean }
+export declare function midi(analysis: Analysis, opts?: ExportOptions): Uint8Array;
+export declare function chordpro(analysis: Analysis, opts?: ExportOptions): string;
+export declare function txt(analysis: Analysis, opts?: ExportOptions): string;
+export declare function progressionText(analysis: Analysis, opts?: ExportOptions): string;
+export declare function transformChord(name: string, transpose?: number, simplify?: boolean): string;
+export declare function chordNotes(name: string): number[];

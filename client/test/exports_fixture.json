@@ -1,0 +1,116 @@
+{
+ "_comment": "written by service/tests/test_chords.py; client/test checks exports.js against it",
+ "analysis": {
+  "track": {
+   "file_name": "fixture song.flac",
+   "artist": "Someone"
+  },
+  "tempo": {
+   "beats": [
+    0.73,
+    1.332,
+    1.938,
+    2.548,
+    3.162,
+    3.78,
+    4.402,
+    5.028,
+    5.658,
+    6.292,
+    6.93,
+    7.572,
+    8.218,
+    8.868,
+    9.522,
+    10.18,
+    10.842,
+    11.508,
+    12.178,
+    12.852,
+    13.53,
+    14.212,
+    14.898,
+    15.588
+   ],
+   "downbeats": [
+    0.73,
+    3.162,
+    5.658,
+    8.218,
+    10.842,
+    13.53
+   ],
+   "display": {
+    "bpm": "99.4"
+   }
+  },
+  "key": {
+   "display": {
+    "key": "A Minor* / C Major"
+   }
+  },
+  "chords": {
+   "segments": [
+    {
+     "start": 0.73,
+     "end": 3.162,
+     "chord": "Am"
+    },
+    {
+     "start": 3.162,
+     "end": 5.658,
+     "chord": "Fmaj7"
+    },
+    {
+     "start": 5.658,
+     "end": 8.218,
+     "chord": "C/E"
+    },
+    {
+     "start": 8.218,
+     "end": 10.842,
+     "chord": "N"
+    },
+    {
+     "start": 10.842,
+     "end": 13.53,
+     "chord": "G7"
+    },
+    {
+     "start": 13.53,
+     "end": 16.188,
+     "chord": "Dm7b5"
+    }
+   ],
+   "progressions": [
+    {
+     "display": "i–VI–III–VII ×2",
+     "chords": "Am-F-C-G"
+    }
+   ]
+  }
+ },
+ "cases": [
+  {
+   "transpose": 0,
+   "simplify": false,
+   "midi_b64": "TVRoZAAAAAYAAQADAeBNVHJrAAAA0AD/AwlUZW1wbyBtYXAA/1EDCyOQg2D/UQMJL5CDYP9RAwk/MINg/1EDCU7Qg2D/UQMJXnCDYP9RAwluEINg/1EDCX2wg2D/UQMJjVCDYP9RAwmc8INg/1EDCayQg2D/UQMJvDCDYP9RAwnL0INg/1EDCdtwg2D/UQMJ6xCDYP9RAwn6sINg/1EDCgpQg2D/UQMKGfCDYP9RAwopkINg/1EDCjkwg2D/UQMKSNCDYP9RAwpYcINg/1EDCmgQg2D/UQMKd7CDYP9RAwqHUAD/LwBNVHJrAAAA8gD/AwZDaG9yZHODYJAtUACQOVAAkDxQAJBAUAD/BgJBbY5/gC0AAIA5AACAPAAAgEAAAZApUACQNVAAkDlQAJA8UACQQFAA/wYFRm1hajeOf4ApAACANQAAgDkAAIA8AACAQAABkChQAJA3UACQPFAAkEBQAP8GA0MvRY5/gCgAAIA3AACAPAAAgEAAjwGQK1AAkDVQAJA3UACQO1AAkD5QAP8GAkc3jn+AKwAAgDUAAIA3AACAOwAAgD4AAZAmUACQNVAAkDhQAJA8UACQPlAA/wYFRG03YjWOQIAmAACANQAAgDgAAIA8AACAPgAA/y8ATVRyawAAACcA/wMESW5mbwD/ARdLZXk6IEEgTWlub3IqIC8gQyBNYWpvcgD/LwA=",
+   "chordpro": "{title: fixture song}\n{artist: Someone}\n{key: A Minor}\n{tempo: 99.4}\n| [Am] | [Fmaj7] | [C/E] | [N] |\n| [G7] | [Dm7b5] |\n",
+   "txt": "fixture song - Someone  (A Minor* / C Major, 99.4 BPM)\n\nAm | Fmaj7 | C/E | N\nG7 | Dm7b5\n\nProgressions: i–VI–III–VII ×2\n"
+  },
+  {
+   "transpose": 2,
+   "simplify": false,
+   "midi_b64": "TVRoZAAAAAYAAQADAeBNVHJrAAAA0AD/AwlUZW1wbyBtYXAA/1EDCyOQg2D/UQMJL5CDYP9RAwk/MINg/1EDCU7Qg2D/UQMJXnCDYP9RAwluEINg/1EDCX2wg2D/UQMJjVCDYP9RAwmc8INg/1EDCayQg2D/UQMJvDCDYP9RAwnL0INg/1EDCdtwg2D/UQMJ6xCDYP9RAwn6sINg/1EDCgpQg2D/UQMKGfCDYP9RAwopkINg/1EDCjkwg2D/UQMKSNCDYP9RAwpYcINg/1EDCmgQg2D/UQMKd7CDYP9RAwqHUAD/LwBNVHJrAAAA8wD/AwZDaG9yZHODYJAvUACQNlAAkDtQAJA+UAD/BgJCbY5/gC8AAIA2AACAOwAAgD4AAZArUACQNlAAkDdQAJA7UACQPlAA/wYFR21hajeOf4ArAACANgAAgDcAAIA7AACAPgABkCpQAJA2UACQOVAAkD5QAP8GBEQvR2KOf4AqAACANgAAgDkAAIA+AI8BkC1QAJA3UACQOVAAkD1QAJBAUAD/BgJBN45/gC0AAIA3AACAOQAAgD0AAIBAAAGQKFAAkDdQAJA6UACQPlAAkEBQAP8GBUVtN2I1jkCAKAAAgDcAAIA6AACAPgAAgEAAAP8vAE1UcmsAAAAnAP8DBEluZm8A/wEXS2V5OiBBIE1pbm9yKiAvIEMgTWFqb3IA/y8A",
+   "chordpro": "{title: fixture song}\n{artist: Someone}\n{key: A Minor}\n{tempo: 99.4}\n{comment: transposed +2 semitones}\n| [Bm] | [Gmaj7] | [D/Gb] | [N] |\n| [A7] | [Em7b5] |\n",
+   "txt": "fixture song - Someone  (A Minor* / C Major, 99.4 BPM)\n\nBm | Gmaj7 | D/Gb | N\nA7 | Em7b5\n\nProgressions: i–VI–III–VII ×2\n"
+  },
+  {
+   "transpose": -3,
+   "simplify": true,
+   "midi_b64": "TVRoZAAAAAYAAQADAeBNVHJrAAAA0AD/AwlUZW1wbyBtYXAA/1EDCyOQg2D/UQMJL5CDYP9RAwk/MINg/1EDCU7Qg2D/UQMJXnCDYP9RAwluEINg/1EDCX2wg2D/UQMJjVCDYP9RAwmc8INg/1EDCayQg2D/UQMJvDCDYP9RAwnL0INg/1EDCdtwg2D/UQMJ6xCDYP9RAwn6sINg/1EDCgpQg2D/UQMKGfCDYP9RAwopkINg/1EDCjkwg2D/UQMKSNCDYP9RAwpYcINg/1EDCmgQg2D/UQMKd7CDYP9RAwqHUAD/LwBNVHJrAAAA0wD/AwZDaG9yZHODYJAqUACQNlAAkDlQAJA9UAD/BgNHYm2Of4AqAACANgAAgDkAAIA9AAGQJlAAkDZQAJA5UACQPlAA/wYBRI5/gCYAAIA2AACAOQAAgD4AAZAtUACQOVAAkD1QAJBAUAD/BgFBjn+ALQAAgDkAAIA9AACAQACPAZAoUACQOFAAkDtQAJBAUAD/BgFFjn+AKAAAgDgAAIA7AACAQAABkC9QAJA1UACQO1AAkD5QAP8GBEJkaW2OQIAvAACANQAAgDsAAIA+AAD/LwBNVHJrAAAAJwD/AwRJbmZvAP8BF0tleTogQSBNaW5vciogLyBDIE1ham9yAP8vAA==",
+   "chordpro": "{title: fixture song}\n{artist: Someone}\n{key: A Minor}\n{tempo: 99.4}\n{comment: transposed -3 semitones}\n| [Gbm] | [D] | [A] | [N] |\n| [E] | [Bdim] |\n",
+   "txt": "fixture song - Someone  (A Minor* / C Major, 99.4 BPM)\n\nGbm | D | A | N\nE | Bdim\n\nProgressions: i–VI–III–VII ×2\n"
+  }
+ ]
+}

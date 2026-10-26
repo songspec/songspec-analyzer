@@ -36,4 +36,6 @@ def _csv(view, **_):
     return buf.getvalue(), "text/csv; charset=utf-8", "csv"
 
 
-EXPORTERS = {"json": _json, "csv": _csv, "tracker-row": _tracker}
+from .chords import chordpro, midi, txt  # noqa: E402
+
+EXPORTERS = {"json": _json, "csv": _csv, "tracker-row": _tracker, "midi": midi, "chordpro": chordpro, "txt": txt}

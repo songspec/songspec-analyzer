@@ -196,3 +196,4 @@ function sleep(ms, signal) {
 }
 
 export * from "./formatters.js";
+export { chordNotes, chordpro, midi, progressionText, transform as transformChord, txt } from "./exports.js";

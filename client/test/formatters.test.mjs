@@ -1,8 +1,9 @@
 // Runs the shared house-style cases (service/tests/display_cases.json) against formatters.js.
 // Browser: open client/test/index.html through the service (SONGSPEC_SERVE_DEMO=1). Node 18+: node client/test/formatters.test.mjs
 import * as F from "../formatters.js";
+import * as X from "../exports.js";
 
-export async function runAll(loadJson) {
+export async function runAll(loadJson, loadFixture = null) {
   const C = await loadJson();
   const results = [];
   const check = (name, got, want) => results.push({ name, ok: JSON.stringify(got) === JSON.stringify(want), got, want });
@@ -48,13 +49,29 @@ export async function runAll(loadJson) {
   check("simplify Ebmaj7/G", F.simplifyChord("Ebmaj7/G"), "Eb");
   check("simplify Dm7b5", F.simplifyChord("Dm7b5"), "Ddim");
   check("simplify Cm9", F.simplifyChord("Cm9"), "Cm");
+
+  // exports.js must produce exactly what the service produces (fixture written by service/tests/test_chords.py)
+  if (loadFixture) {
+    const fx = await loadFixture();
+    for (const c of fx.cases) {
+      const opt = { transpose: c.transpose, simplify: c.simplify };
+      const bytes = X.midi(fx.analysis, opt);
+      const b64 = typeof btoa === "function" ? btoa(String.fromCharCode(...bytes)) : Buffer.from(bytes).toString("base64");
+      check(`export midi t${c.transpose} s${c.simplify}`, b64, c.midi_b64);
+      check(`export chordpro t${c.transpose} s${c.simplify}`, X.chordpro(fx.analysis, opt), c.chordpro);
+      check(`export txt t${c.transpose} s${c.simplify}`, X.txt(fx.analysis, opt), c.txt);
+    }
+    check("export transform", X.transform("Ebmaj7/G", 2), "Fmaj7/A");
+    check("progression text", X.progressionText(fx.analysis, { transpose: 2 }), "Bm - G - D - A");
+  }
   return results;
 }
 
 if (typeof process !== "undefined" && process.argv && import.meta.url.endsWith(process.argv[1]?.replace(/\\/g, "/").split("/").pop())) {
   const fs = await import("node:fs");
   const url = new URL("../../service/tests/display_cases.json", import.meta.url);
-  const res = await runAll(async () => JSON.parse(fs.readFileSync(url, "utf-8")));
+  const fx = new URL("./exports_fixture.json", import.meta.url);
+  const res = await runAll(async () => JSON.parse(fs.readFileSync(url, "utf-8")), async () => JSON.parse(fs.readFileSync(fx, "utf-8")));
   const bad = res.filter((r) => !r.ok);
   for (const b of bad) console.log("FAIL", b.name, "got", b.got, "want", b.want);
   console.log(`${res.length - bad.length}/${res.length} passed`);

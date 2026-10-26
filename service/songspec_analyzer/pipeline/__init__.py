@@ -81,8 +81,9 @@ def build_stages():
         stages.append(Stage("detune_drift", "Following the tuning over time...", detune.drift_stage))
     except ImportError:
         stages.append(Stage("detune_drift", "Following the tuning over time..."))
+    from ..chords import stage as chords_stage
     stages += [Stage("stems", "Separating stems..."),
-               Stage("chords", "Detecting chords..."),
+               Stage("chords", "Detecting chords...", chords_stage),
                Stage("key", "Weighing the key evidence..."),
                Stage("metadata", "Checking Hooktheory...")]
     return stages

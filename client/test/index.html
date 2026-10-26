@@ -17,7 +17,8 @@
 <pre id="out"></pre>
 <script type="module">
   import { runAll } from "./formatters.test.mjs";
-  const res = await runAll(async () => (await fetch("/cases/display_cases.json")).json());
+  const res = await runAll(async () => (await fetch("/cases/display_cases.json")).json(),
+                           async () => (await fetch("./exports_fixture.json")).json());
   const bad = res.filter((r) => !r.ok);
   const s = document.getElementById("summary");
   s.textContent = `${res.length - bad.length}/${res.length} passed`;
