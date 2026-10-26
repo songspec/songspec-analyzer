@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-from common import RESULTS, cache_path, cached, catalog_dir, load_labels, md_table
+from common import CLI_JOBS, CREATIONFLAGS, RESULTS, cache_path, cached, catalog_dir, load_labels, md_table
 
 from songspec_analyzer.audio.decode import load_audio
 from songspec_analyzer.config import Settings
@@ -72,7 +72,8 @@ def run_centsible(paths):
     out = {}
     with tempfile.TemporaryDirectory() as td:
         csv_path = Path(td) / "c.csv"
-        subprocess.run([str(CENTSIBLE_CLI), "--csv", str(csv_path)] + [str(p) for p in paths], capture_output=True, timeout=7200)
+        subprocess.run([str(CENTSIBLE_CLI), "--jobs", CLI_JOBS, "--csv", str(csv_path)] + [str(p) for p in paths],
+                       capture_output=True, timeout=7200, creationflags=CREATIONFLAGS)
         if csv_path.exists():
             with open(csv_path, encoding="utf-8", errors="replace") as f:
                 for r in csv.DictReader(f):

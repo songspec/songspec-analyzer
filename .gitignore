@@ -33,3 +33,7 @@ eval/results/
 .claude/
 .venv311/
 *.log
+
+# compiled bindings (tools/build_native.py)
+*.pyd
+*.so

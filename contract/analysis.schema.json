@@ -207,6 +207,19 @@
           "title": "Drift Flag",
           "type": "boolean"
         },
+        "drift_range_cents": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "p95 - p5 of the 10 s windows around the song's tuning",
+          "title": "Drift Range Cents"
+        },
         "secondary": {
           "anyOf": [
             {
@@ -235,6 +248,45 @@
           "description": "each estimator's vote, cents",
           "title": "Estimators",
           "type": "object"
+        },
+        "fusion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "'centsible' (its interval was tight) or 'weighted circular median'",
+          "title": "Fusion"
+        },
+        "locked": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Centsible's LOCKED state: interval <= 0.3 cents and steady",
+          "title": "Locked"
+        },
+        "competing": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "two tunings carry about the same evidence (e.g. a sampled loop under the vocal)",
+          "title": "Competing"
         },
         "display": {
           "anyOf": [
@@ -474,6 +526,12 @@
           "description": "{'hooktheory': {key, bpm, url, agrees}}",
           "title": "Metadata",
           "type": "object"
+        },
+        "preliminary": {
+          "default": false,
+          "description": "true while only the quick key exists (Centsible's detector); the fused key replaces it",
+          "title": "Preliminary",
+          "type": "boolean"
         },
         "display": {
           "anyOf": [

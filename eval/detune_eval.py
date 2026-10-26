@@ -17,14 +17,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-if sys.platform == "win32":                       # gentle on the machine (see PROGRESS.md: a full-load run once crashed the PC)
-    import ctypes
-    ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00004000)
-
 import numpy as np
 import soundfile as sf
 
-from common import RESULTS, cached, load_labels, md_table
+from common import CREATIONFLAGS, RESULTS, cached, load_labels, md_table
 
 from songspec_analyzer.audio.decode import load_audio
 from songspec_analyzer.detune import estimators as est
@@ -56,7 +52,7 @@ def rubberband_shift(y, sr, cents):
         i, o = Path(td) / "i.wav", Path(td) / "o.wav"
         sf.write(i, y, sr, subtype="FLOAT")
         subprocess.run([str(RB), "-3", "-p", f"{cents / 100.0:.6f}", str(i), str(o)], capture_output=True, check=True,
-                       creationflags=0x00004000 if sys.platform == "win32" else 0)
+                       creationflags=CREATIONFLAGS)
         z, _ = sf.read(o, dtype="float32")
         return z if z.ndim == 1 else z.mean(axis=1)
 

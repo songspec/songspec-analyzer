@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from common import RESULTS, ROOT, cached, load_labels, md_table
+from common import CLI_JOBS, CREATIONFLAGS, RESULTS, ROOT, cached, load_labels, md_table
 
 from songspec_analyzer.audio.decode import load_audio
 from songspec_analyzer.detune import _centsible
@@ -27,8 +27,8 @@ wrap = lambda c: c - 100.0 * np.floor((c + 50.0) / 100.0)
 def cli_batch(paths):
     with tempfile.TemporaryDirectory() as td:
         out = Path(td) / "c.csv"
-        subprocess.run([str(CLI), "--csv", str(out)] + [str(p) for p in paths], capture_output=True, timeout=7200,
-                       creationflags=0x00004000 if sys.platform == "win32" else 0)
+        subprocess.run([str(CLI), "--jobs", CLI_JOBS, "--csv", str(out)] + [str(p) for p in paths], capture_output=True, timeout=7200,
+                       creationflags=CREATIONFLAGS)
         rows = {}
         with open(out, encoding="utf-8", errors="replace") as f:
             for r in csv.DictReader(f):

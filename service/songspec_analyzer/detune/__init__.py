@@ -29,7 +29,7 @@ def fuse(votes):
     c = votes.get("centsible")
     if c and c[0] is not None and c[1] <= TIGHT_CI and not votes.get("_competing"):
         return c[0], c[1], "centsible"
-    vals = [(v, ci) for k, (v, ci) in votes.items() if not k.startswith("_") and v is not None]
+    vals = [vc for k, vc in votes.items() if not k.startswith("_") and vc[0] is not None]
     if not vals:
         return None, None, "none"
     w = [1.0 / max(ci, 0.5) ** 2 for _, ci in vals]
