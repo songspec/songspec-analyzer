@@ -51,6 +51,7 @@ Auth options: (a) put the service behind your backend and call it server-to-serv
 | `GET` | `/v1/analyses/{id}/events` | SSE: `update` (full view on every change), then `done` or `error` |
 | `GET` | `/v1/analyses/{id}/exports/{fmt}` | `json`, `csv`, `tracker-row` now; `midi`, `chordpro`, `txt` with the chord milestone. `?transpose=N&simplify=1` |
 | `POST` | `/v1/analyses/{id}/feedback` | `{"field": "key"|"bpm"|"detune"|"signature"|"chords"|"other", "correct": "Bb Minor", "comment": "..."}` |
+| `GET` | `/v1/match?a=<id>&b=<id>` | mashup helper: how to make song b sit on song a (semitones, cents, tempo ratio incl. half/double time, Camelot before/after, ready-made `display` strings) |
 | `GET` | `/v1/version`, `/v1/health`, `/v1/schema` | engine/schema version, accepted formats, limits; liveness; the JSON Schema |
 
 Options: `high_accuracy` (bool, stem separation), `signature` (force a time signature, e.g. `"6/8"`), `hooktheory` (bool, default on when configured).

@@ -231,6 +231,16 @@ def create_app(settings: Settings = None) -> FastAPI:
                                     request.headers.get("x-songspec-user"))
         return {"ok": True}
 
+    # ------------------------------------------------------------------ mashup helper
+    @app.get("/v1/match")
+    async def match(a: str, b: str):
+        """How to make song b sit on song a: semitones, cents, tempo ratio, Camelot compatibility."""
+        from ..match import advise
+        ra, rb = get_row(a), get_row(b)
+        if ra["status"] != "done" or rb["status"] != "done":
+            raise ApiError(409, "not_ready", "both analyses must have finished")
+        return advise(public_view(ra), public_view(rb))
+
     # ------------------------------------------------------------------ ops
     @app.get("/v1/health")
     async def health():

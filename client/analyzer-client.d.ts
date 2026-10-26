@@ -82,6 +82,16 @@ export interface AnalyzerClient {
   exportBlob(id: string, format: ExportFormat, opts?: { transpose?: number; simplify?: boolean }): Promise<Blob>;
   feedback(id: string, field: "key" | "bpm" | "detune" | "signature" | "chords" | "other", correct: string, comment?: string | null): Promise<void>;
   version(): Promise<{ engine: string; schema: string; formats: string[]; limits: { max_upload_mb: number; max_duration_s: number } }>;
+  match(a: string, b: string): Promise<MatchAdvice>;
+}
+
+export interface MatchAdvice {
+  a: string; b: string;
+  key: { semitones: number; a: string; b: string; b_after: string;
+         camelot_before: "same" | "relative" | "adjacent" | null; camelot_after: "same" | "relative" | "adjacent" | null } | null;
+  tuning: { fine_cents: number; total_cents: number };
+  tempo: { ratio: number; stretch_pct: number; b_level: "half time" | "double time" | null; b_bpm_after: number; varispeed_bpm: number } | null;
+  display: { key?: string; tuning: string; tempo?: string; varispeed?: string };
 }
 
 export declare function createClient(opts?: {

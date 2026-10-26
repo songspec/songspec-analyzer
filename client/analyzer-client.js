@@ -157,7 +157,11 @@ export function createClient({ baseUrl = "", apiKey = null, headers = {}, fetch:
 
   const version = async () => (await request("/v1/version")).json();
 
-  return { start, startLink, get, watch, analyzeFile, analyzeLink, analyzeQueue, exportUrl, exportBlob, feedback, version };
+  /** Mashup helper: how to make analysis b sit on analysis a (semitones, cents, tempo ratio, Camelot). Both must be done. */
+  const match = async (a, b) =>
+    (await request(`/v1/match?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`)).json();
+
+  return { start, startLink, get, watch, analyzeFile, analyzeLink, analyzeQueue, exportUrl, exportBlob, feedback, version, match };
 }
 
 // ------------------------------------------------------------------------------------------------ helpers
