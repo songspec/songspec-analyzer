@@ -90,3 +90,18 @@ def test_centsible_mode_only_when_confident_and_agreeing():
     assert centsible_mode(dict(d, mode_prob=[0.1, 0.1, 0.45, 0.05, 0.05, 0.2, 0.05]), 5, True) == "minor"   # not confident
     assert centsible_mode(d, 7, True) == "minor"                         # reported key differs from Centsible's
     assert centsible_mode(dict(d, degree=5), 5, True) == "minor"         # aeolian is plain minor
+
+
+def test_chord_key_features_separate_relative_keys():
+    from songspec_analyzer.key.chordkey import CHORD_FEATURES, chord_features
+    loop = ["Bbm", "Gb", "Db", "Ab", "Fm", "Bbm"] * 4 + ["Bbm"]           # ends on i, has v -> i
+    segs = [{"start": i * 2.0, "end": i * 2.0 + 2.0, "chord": c} for i, c in enumerate(loop)]
+    F = chord_features(segs, 60.0)
+    bbm, db = 10 + 12, 1                                                  # Bb minor, Db major
+    col = {n: i for i, n in enumerate(CHORD_FEATURES)}
+    assert F[bbm, col["ch_diatonic"]] == pytest.approx(F[db, col["ch_diatonic"]])      # same chords: diatonic can't tell
+    assert F[bbm, col["ch_tonic"]] > F[db, col["ch_tonic"]]
+    assert F[bbm, col["ch_last"]] == 1.0 and F[db, col["ch_last"]] == 0.0
+    # v -> i counts for Bb minor; VI -> III (Gb -> Db) is IV -> I of the relative major: the loop is ambiguous there by nature
+    assert F[bbm, col["ch_cadence"]] > 0 and F[db, col["ch_cadence"]] > 0
+    assert chord_features([], 60.0).sum() == 0

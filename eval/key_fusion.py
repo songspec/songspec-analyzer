@@ -22,7 +22,8 @@ from common import RESULTS, ROOT, cache_path, load_labels, md_table
 from key_eval import artist_group, label_index, mirex
 
 from songspec_analyzer.key import estimators as E
-from songspec_analyzer.key.fusion import KeyFusion, candidate_features
+from songspec_analyzer.key.chordkey import chord_features
+from songspec_analyzer.key.fusion import FEATURE_KINDS, KeyFusion, candidate_features, feature_matrix
 from songspec_analyzer.key.profiles import PROFILES
 
 MODEL = ROOT / "service" / "songspec_analyzer" / "key" / "fusion_model.json"
@@ -31,7 +32,7 @@ SETS = {"centsible": ["centsible"],
         "centsible+6": ["centsible", "albrecht_shanahan@scale", "albrecht_shanahan@beat", "krumhansl@beat", "krumhansl@naive",
                         "edma@naive"],
         "all": ["centsible"] + [f"{p}@{c}" for c in ("beat", "scale", "naive") for p in PROFILES]}
-GRID = list(itertools.product(SETS, (True, False), (0.03, 0.3, 3.0)))
+GRID = list(itertools.product(SETS, FEATURE_KINDS, (0.03, 0.3, 3.0)))
 
 
 def load():
@@ -43,19 +44,24 @@ def load():
         f = json.loads(p.read_text(encoding="utf-8"))
         chroma_log = E.global_chroma(f["chroma_beat_seq"])
         est = E.estimator_pool(f["centsible"], chroma_log, f["chroma_scale"], f["chroma_naive"])
-        feats = candidate_features(f["chroma_scale"], f["chroma_bass"], f.get("chroma_beat_seq"))
+        tie = candidate_features(f["chroma_scale"], f["chroma_bass"], f.get("chroma_beat_seq"))
+        cp = cache_path("chords_v1", r["file"])
+        ch = json.loads(cp.read_text(encoding="utf-8")) if cp.exists() else {"segments": [], "duration": None}
+        chf = chord_features(ch["segments"], ch["duration"])
+        feats = {k: feature_matrix(k, tie, chf) for k in FEATURE_KINDS}
         out.append({"r": r, "g": artist_group(r["artist"]), "est": est, "feats": feats,
                     "y": label_index(r["keys"].split(";")[0])})
     return out
 
 
 def fit(cfg, rows):
-    s, use_f, l2 = cfg
-    return KeyFusion(SETS[s], l2=l2, use_features=use_f).fit([(d["est"], d["feats"], d["y"]) for d in rows])
+    s, kind, l2 = cfg
+    m = KeyFusion(SETS[s], l2=l2, use_features=kind != "none", feature_kind=kind)
+    return m.fit([(d["est"], d["feats"][kind], d["y"]) for d in rows])
 
 
 def predict(model, d):
-    return int(np.argmax(model.predict_proba(d["est"], d["feats"])))
+    return int(np.argmax(model.predict_proba(d["est"], d["feats"][model.feature_kind])))
 
 
 def cv_score(cfg, rows):

@@ -10,7 +10,8 @@ import numpy as np
 
 from ..display.key import FLAT_NAMES, camelot, house_key, key_display, open_key, sections_display
 from . import KEY_NAMES, estimators as E
-from .fusion import KeyFusion, candidate_features
+from .chordkey import chord_features
+from .fusion import KeyFusion, candidate_features, feature_matrix
 from .modes import centsible_mode, choose_mode
 
 MODEL_PATH = Path(__file__).with_name("fusion_model.json")
@@ -128,7 +129,9 @@ def stage(ctx):
     model = load_model()
     prev = ctx.store.get(ctx.aid)["result"].get("key") or {}
     if model is not None:
-        p = model.predict_proba(est, candidate_features(ck["chroma_scale"], ck["chroma_bass"], seq))
+        tie = candidate_features(ck["chroma_scale"], ck["chroma_bass"], seq)
+        chf = chord_features(ctx.data.get("chords") or [], a.duration)
+        p = model.predict_proba(est, feature_matrix(model.feature_kind, tie, chf))
         source = "fusion"
     else:
         p = est["centsible"]

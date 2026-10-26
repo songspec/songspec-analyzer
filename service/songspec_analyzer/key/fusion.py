@@ -55,9 +55,24 @@ def design(est_probs, feats, names):
     return X
 
 
+FEATURE_KINDS = ("none", "tiebreak", "chords", "tiebreak+chords")
+
+
+def feature_matrix(kind, tiebreak, chords):
+    """The candidate feature columns for a feature kind: tiebreak (24 x 6), chords (24 x 5, key/chordkey.py)."""
+    if kind == "none":
+        return np.zeros((24, 0))
+    if kind == "tiebreak":
+        return np.asarray(tiebreak, float)
+    if kind == "chords":
+        return np.asarray(chords, float)
+    return np.hstack([np.asarray(tiebreak, float), np.asarray(chords, float)])
+
+
 class KeyFusion:
-    def __init__(self, names, l2=1.0, use_features=True):
+    def __init__(self, names, l2=1.0, use_features=True, feature_kind=None):
         self.names, self.l2, self.use_features = list(names), l2, use_features
+        self.feature_kind = feature_kind or ("tiebreak" if use_features else "none")
         self.w = None
 
     def _X(self, est_probs, feats):
@@ -98,11 +113,11 @@ class KeyFusion:
         return p / p.sum()
 
     def to_dict(self):
-        return {"names": self.names, "l2": self.l2, "use_features": self.use_features, "features": FEATURES,
-                "w": [round(float(x), 6) for x in self.w]}
+        return {"names": self.names, "l2": self.l2, "use_features": self.use_features, "feature_kind": self.feature_kind,
+                "features": FEATURES, "w": [round(float(x), 6) for x in self.w]}
 
     @classmethod
     def from_dict(cls, d):
-        m = cls(d["names"], d["l2"], d["use_features"])
+        m = cls(d["names"], d["l2"], d["use_features"], d.get("feature_kind"))
         m.w = np.asarray(d["w"], float)
         return m
