@@ -64,8 +64,12 @@ class Detune(_M):
     a4_hz: float
     drift: List[DriftPoint] = Field(default_factory=list, description="tuning per window; meaningful when drift_flag")
     drift_flag: bool = Field(False, description="the tuning moves by more than 5 cents over the song")
+    drift_range_cents: Optional[float] = Field(None, description="p95 - p5 of the 10 s windows around the song's tuning")
     secondary: Optional[dict] = Field(None, description="a second tuning in the mix (e.g. an 808 off the rest): {cents, share}")
     estimators: Dict[str, Optional[float]] = Field(default_factory=dict, description="each estimator's vote, cents")
+    fusion: Optional[str] = Field(None, description="'centsible' (its interval was tight) or 'weighted circular median'")
+    locked: Optional[bool] = Field(None, description="Centsible's LOCKED state: interval <= 0.3 cents and steady")
+    competing: Optional[bool] = Field(None, description="two tunings carry about the same evidence (e.g. a sampled loop under the vocal)")
     display: Optional[DetuneDisplay] = None
 
 
@@ -141,6 +145,7 @@ class Key(_M):
     modulations: List[dict] = Field(default_factory=list, description="[{t, from, to, kind}] e.g. kind 'half-step lift'")
     estimators: Dict[str, dict] = Field(default_factory=dict, description="each estimator's top key and probability")
     metadata: Dict[str, dict] = Field(default_factory=dict, description="{'hooktheory': {key, bpm, url, agrees}}")
+    preliminary: bool = Field(False, description="true while only the quick key exists (Centsible's detector); the fused key replaces it")
     display: Optional[KeyDisplay] = None
 
 

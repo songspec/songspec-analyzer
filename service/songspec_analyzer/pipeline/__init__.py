@@ -64,16 +64,23 @@ def build_stages():
     """The stage list in run order. Stage modules register themselves here as milestones land."""
     stages = [Stage("decode", "Reading the file...", _decode, essential=True)]
     try:
-        from ..detune import stage as detune_stage
-        stages.append(Stage("detune", "Measuring detune...", detune_stage))
+        from .. import detune
+        detune._core()                                  # the compiled Centsible binding (tools/build_native.py)
+        stages += [Stage("detune", "Measuring detune...", detune.stage),
+                   Stage("key_quick", "Estimating the key...", detune.key_quick)]
     except ImportError:
-        stages.append(Stage("detune", "Measuring detune..."))
-    stages.append(Stage("key_quick", "Estimating the key..."))
+        stages += [Stage("detune", "Measuring detune..."), Stage("key_quick", "Estimating the key...")]
     try:
         from ..tempo import stage as tempo_stage
         stages.append(Stage("tempo", "Finding beats...", tempo_stage))
     except ImportError:
         stages.append(Stage("tempo", "Finding beats..."))
+    try:
+        from .. import detune
+        detune._core()
+        stages.append(Stage("detune_drift", "Following the tuning over time...", detune.drift_stage))
+    except ImportError:
+        stages.append(Stage("detune_drift", "Following the tuning over time..."))
     stages += [Stage("stems", "Separating stems..."),
                Stage("chords", "Detecting chords..."),
                Stage("key", "Weighing the key evidence..."),
