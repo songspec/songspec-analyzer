@@ -1,36 +1,35 @@
 #!/usr/bin/env python3
 """Train and evaluate the key fusion (service/songspec_analyzer/key/fusion.py) on the cached key features (eval/key_eval.py).
 
-Protocol (PLAN.md section 5, "hold out a test split you never tune on"):
-  held-out  artist fold 0 of 5 (key_eval.held_out): touched ONCE, at the end
-  dev       everything else: 4-fold cross-validation by artist (a different hash) to choose the estimator set, the use of the
-            tiebreaker features and the L2 strength
-Then the chosen configuration is trained on all of dev and scored on held-out, next to every single estimator on the same songs.
-Gate: the fusion must beat the best single estimator on held-out; otherwise the report says so and the model is not installed.
+Protocol: NESTED cross-validation by artist group (key_eval.artist_group: 5 song-balanced groups, 23 artists in the catalog).
+  outer   for each group g: choose the configuration (estimator set, tiebreaker features on/off, L2) by cross-validation over the
+          other four groups only, train it on those four, predict g. Every song is predicted by a model that never saw its artist
+          and was never tuned on it ("hold out a test split you never tune on", without one lucky / unlucky held-out group).
+  ship    the configuration chosen by 5-fold CV over all groups, trained on all songs (service/.../key/fusion_model.json).
+Gate (PLAN.md): the fusion's outer score must beat the best single estimator (whose choice even gets to look at all songs);
+otherwise no model is installed and the service keeps Centsible's key.
 Run:  .venv/Scripts/python eval/key_fusion.py [--install]
 """
 import argparse
-import hashlib
 import itertools
 import json
 import sys
 import time
-from pathlib import Path
 
 import numpy as np
 
 from common import RESULTS, ROOT, cache_path, load_labels, md_table
-from key_eval import held_out, label_index, mirex
+from key_eval import artist_group, label_index, mirex
 
-from songspec_analyzer.key import KEY_NAMES, estimators as E
+from songspec_analyzer.key import estimators as E
 from songspec_analyzer.key.fusion import KeyFusion, candidate_features
 from songspec_analyzer.key.profiles import PROFILES
 
 MODEL = ROOT / "service" / "songspec_analyzer" / "key" / "fusion_model.json"
-
-
-def dev_fold(artist, k=4):
-    return int(hashlib.sha1(("dev:" + artist.strip().lower()).encode()).hexdigest(), 16) % k
+SETS = {"centsible": ["centsible"],
+        "centsible+4": ["centsible", "temperley", "edma", "albrecht_shanahan", "bgate"],
+        "all": ["centsible"] + list(PROFILES)}
+GRID = list(itertools.product(SETS, (True, False), (0.03, 0.3, 3.0)))
 
 
 def load():
@@ -43,16 +42,30 @@ def load():
         est = {"centsible": np.asarray(f["centsible"])}
         est.update(E.profile_probs(np.asarray(f["chroma_beat"])))
         feats = candidate_features(f["chroma_beat"], f["chroma_bass"], f.get("chroma_beat_seq"))
-        out.append({"r": r, "est": est, "feats": feats, "y": label_index(r["keys"].split(";")[0])})
+        out.append({"r": r, "g": artist_group(r["artist"]), "est": est, "feats": feats,
+                    "y": label_index(r["keys"].split(";")[0])})
     return out
 
 
-def score(model, rows):
-    return np.mean([mirex(int(np.argmax(model.predict_proba(d["est"], d["feats"]))), d["y"])[0] for d in rows])
+def fit(cfg, rows):
+    s, use_f, l2 = cfg
+    return KeyFusion(SETS[s], l2=l2, use_features=use_f).fit([(d["est"], d["feats"], d["y"]) for d in rows])
 
 
-def single(name, rows):
-    return np.mean([mirex(int(np.argmax(d["est"][name])), d["y"])[0] for d in rows])
+def predict(model, d):
+    return int(np.argmax(model.predict_proba(d["est"], d["feats"])))
+
+
+def cv_score(cfg, rows):
+    """Leave-one-artist-group-out over the groups present in rows (weighted per song)."""
+    total, n = 0.0, 0
+    for g in sorted({d["g"] for d in rows}):
+        tr = [d for d in rows if d["g"] != g]
+        te = [d for d in rows if d["g"] == g]
+        m = fit(cfg, tr)
+        total += sum(mirex(predict(m, d), d["y"])[0] for d in te)
+        n += len(te)
+    return total / n
 
 
 def main():
@@ -60,50 +73,54 @@ def main():
     ap.add_argument("--install", action="store_true", help="write the model the service loads (only if it passes the gate)")
     a = ap.parse_args()
     data = load()
-    held = [d for d in data if held_out(d["r"]["artist"])]
-    dev = [d for d in data if not held_out(d["r"]["artist"])]
-    print(f"{len(data)} songs: dev {len(dev)}, held-out {len(held)}")
+    groups = sorted({d["g"] for d in data})
+    print(f"{len(data)} songs in artist groups {[sum(d['g'] == g for d in data) for g in groups]}", flush=True)
 
-    sets = {"centsible": ["centsible"],
-            "centsible+4": ["centsible", "temperley", "edma", "albrecht_shanahan", "bgate"],
-            "all": ["centsible"] + list(PROFILES)}
-    grid = list(itertools.product(sets, (True, False), (0.03, 0.3, 3.0)))
-    cv = []
-    for set_name, use_f, l2 in grid:
-        folds = []
-        for k in range(4):
-            tr = [d for d in dev if dev_fold(d["r"]["artist"]) != k]
-            te = [d for d in dev if dev_fold(d["r"]["artist"]) == k]
-            m = KeyFusion(sets[set_name], l2=l2, use_features=use_f).fit([(d["est"], d["feats"], d["y"]) for d in tr])
-            folds.append(score(m, te) * len(te))
-        cv.append((sum(folds) / len(dev), set_name, use_f, l2))
-        print(f"  CV {cv[-1][0]:.3f}  estimators={set_name:12s} features={use_f!s:5s} l2={l2}", flush=True)
-    best = max(cv)
-    _, set_name, use_f, l2 = best
-    model = KeyFusion(sets[set_name], l2=l2, use_features=use_f).fit([(d["est"], d["feats"], d["y"]) for d in dev])
+    outer_pred, chosen = {}, []
+    for g in groups:
+        inner = [d for d in data if d["g"] != g]
+        best = max(GRID, key=lambda cfg: cv_score(cfg, inner))
+        chosen.append(best)
+        m = fit(best, inner)
+        for i, d in enumerate(data):
+            if d["g"] == g:
+                outer_pred[i] = predict(m, d)
+        print(f"  group {g}: chose {best}", flush=True)
+    fused = [mirex(outer_pred[i], d["y"]) for i, d in enumerate(data)]
+    singles = {n: [mirex(int(np.argmax(d["est"][n])), d["y"]) for d in data] for n in ["centsible"] + list(PROFILES)}
+    best_single = max(singles, key=lambda n: np.mean([s for s, _ in singles[n]]))
 
-    singles = {n: (single(n, dev), single(n, held)) for n in ["centsible"] + list(PROFILES)}
-    best_single = max(singles, key=lambda n: singles[n][0])          # chosen on dev, like the fusion
-    fused_held = score(model, held)
-    exact = lambda rows, f: 100 * np.mean([int(np.argmax(f(d))) == d["y"] for d in rows])
-    rows = [["fusion (" + set_name + (", features" if use_f else "") + f", l2 {l2})", f"{best[0]:.3f}", f"{fused_held:.3f}",
-             f"{exact(held, lambda d: model.predict_proba(d['est'], d['feats'])):.1f} %"]]
-    for n, (sd, sh) in sorted(singles.items(), key=lambda kv: -kv[1][0]):
-        rows.append([n, f"{sd:.3f}", f"{sh:.3f}", f"{exact(held, lambda d: d['est'][n]):.1f} %"])
-    passed = fused_held > singles[best_single][1]
+    def row(name, res):
+        s = np.array([x for x, _ in res])
+        kinds = [k for _, k in res]
+        per_group = [np.mean([res[i][0] for i, d in enumerate(data) if d["g"] == g]) for g in groups]
+        return [name, f"{s.mean():.3f}", f"{100 * np.mean(s == 1):.1f} %", " / ".join(f"{v:.2f}" for v in per_group),
+                kinds.count("fifth"), kinds.count("relative"), kinds.count("parallel"), kinds.count("other")]
+
+    table = [row("fusion (nested CV)", fused)] + [row(n, singles[n]) for n in sorted(singles, key=lambda n: -np.mean([s for s, _ in singles[n]]))]
+    f_mean, b_mean = np.mean([s for s, _ in fused]), np.mean([s for s, _ in singles[best_single]])
+    # paired comparison with the best single estimator: how often each one is better
+    better = sum(f > b for (f, _), (b, _) in zip(fused, singles[best_single]))
+    worse = sum(f < b for (f, _), (b, _) in zip(fused, singles[best_single]))
+    passed = f_mean > b_mean
+    ship = max(GRID, key=lambda cfg: cv_score(cfg, data))
     out = [f"# Key fusion ({time.strftime('%Y-%m-%d')})", "",
-           f"Dev {len(dev)} songs (4-fold CV by artist), held-out {len(held)} songs (artist fold 0 of 5, used once).", "",
-           md_table(["model", "MIREX dev (CV for the fusion, in-sample for singles)", "MIREX held-out", "exact held-out"], rows), "",
-           f"Best single estimator chosen on dev: **{best_single}** (held-out {singles[best_single][1]:.3f}). "
-           f"Gate (fusion beats it on held-out): **{'passed' if passed else 'NOT passed'}** ({fused_held:.3f}).", ""]
+           f"{len(data)} catalog songs with a tracker key, 5 artist groups of {[sum(d['g'] == g for d in data) for g in groups]} songs. "
+           "Fusion = nested cross-validation (each group predicted by a model chosen and trained on the other four).", "",
+           md_table(["estimator", "MIREX weighted", "exact", "MIREX per artist group", "fifth", "relative", "parallel", "other"], table), "",
+           f"Best single estimator: **{best_single}** ({b_mean:.3f}). Fusion {f_mean:.3f}: better on {better} songs, worse on {worse}. "
+           f"Gate: **{'passed' if passed else 'NOT passed'}**.",
+           f"Configurations chosen per outer group: {chosen}. Shipped configuration (5-fold CV on all songs): {ship}.", ""]
     (RESULTS / "key_fusion.md").write_text("\n".join(out), encoding="utf-8")
     print("\n".join(out))
     if a.install:
         if not passed:
-            print("not installed: the fusion does not beat the best single estimator on held-out")
+            print("not installed: the fusion does not beat the best single estimator")
             return 1
-        d = model.to_dict()
-        d.update(trained=time.strftime("%Y-%m-%d"), songs=len(dev), cv_mirex=round(best[0], 4), heldout_mirex=round(fused_held, 4))
+        m = fit(ship, data)
+        d = m.to_dict()
+        d.update(trained=time.strftime("%Y-%m-%d"), songs=len(data), nested_cv_mirex=round(float(f_mean), 4),
+                 best_single=best_single, best_single_mirex=round(float(b_mean), 4))
         MODEL.write_text(json.dumps(d, indent=1) + "\n", encoding="utf-8")
         print(f"installed {MODEL}")
     return 0

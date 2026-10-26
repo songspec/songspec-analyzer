@@ -35,8 +35,29 @@ def label_index(text):
     return tonic + (12 if is_minor(mode) else 0)
 
 
+_GROUPS = None
+
+
+def artist_group(artist):
+    """Artists in 5 song-balanced groups for NESTED cross-validation (eval/key_fusion.py): largest artist first, each to the group
+    with the fewest songs so far (ties: sha1 of the name). A song is always predicted by a model that never saw its artist.
+    (The first split, 'sha1(artist) % 5 == 0' as one held-out group, put 37 % of the songs in held-out and left dev folds of
+    68 / 28 / 6 / 2 songs, because the catalog has only 23 artists; it was replaced before any model was chosen.)"""
+    global _GROUPS
+    if _GROUPS is None:
+        from collections import Counter
+        counts = Counter(r["artist"].strip().lower() for r in load_labels() if r["keys"].strip())
+        order = sorted(counts, key=lambda a: (-counts[a], hashlib.sha1(a.encode()).hexdigest()))
+        sizes, _GROUPS = [0] * 5, {}
+        for a in order:
+            g = min(range(5), key=lambda i: (sizes[i], i))
+            _GROUPS[a] = g
+            sizes[g] += counts[a]
+    return _GROUPS.get(artist.strip().lower(), 0)
+
+
 def held_out(artist):
-    return int(hashlib.sha1(artist.strip().lower().encode()).hexdigest(), 16) % 5 == 0
+    return artist_group(artist) == 0
 
 
 def mirex(est, ref):
@@ -112,28 +133,26 @@ def main():
         return out
 
     names = ["centsible"] + list(PROFILES) + ["librosa-ks"]
-    scores = {n: {"all": [], "held": []} for n in names}
+    scores = {n: [] for n in names}
+    groups = [artist_group(r["artist"]) for r, _ in data]
     conf = {n: {} for n in names}
     for r, f in data:
         ref = label_index(r["keys"].split(";")[0])
         for n, p in ests(f).items():
             s, kind = mirex(int(np.argmax(p)), ref)
-            scores[n]["all"].append(s)
-            if held_out(r["artist"]):
-                scores[n]["held"].append(s)
+            scores[n].append(s)
             conf[n][kind] = conf[n].get(kind, 0) + 1
     table = []
     for n in names:
-        al, he = np.array(scores[n]["all"]), np.array(scores[n]["held"])
-        c = conf[n]
-        table.append([n, len(al), f"{al.mean():.3f}", f"{100 * np.mean(al == 1):.1f} %",
-                      f"{he.mean():.3f}" if len(he) else "-", f"{100 * np.mean(he == 1):.1f} %" if len(he) else "-",
+        al, c = np.array(scores[n]), conf[n]
+        per = " / ".join(f"{al[[g == k for g in groups]].mean():.2f}" for k in range(5))
+        table.append([n, len(al), f"{al.mean():.3f}", f"{100 * np.mean(al == 1):.1f} %", per,
                       c.get("fifth", 0), c.get("relative", 0), c.get("parallel", 0), c.get("other", 0)])
     table.sort(key=lambda r: -float(r[2]))
-    n_held = sum(held_out(r["artist"]) for r, _ in data)
     out = [f"# Key v1 vs tracker keys ({time.strftime('%Y-%m-%d')})", "",
-           f"{len(data)} catalog songs with a tracker key; held-out split (artist fold 0 of 5): {n_held} songs.", "",
-           md_table(["estimator", "songs", "MIREX weighted (all)", "exact (all)", "MIREX (held-out)", "exact (held-out)",
+           f"{len(data)} catalog songs with a tracker key, in 5 artist groups (key_eval.artist_group). The single estimators have no "
+           "trained parameters; the fusion is evaluated by nested cross-validation in eval/key_fusion.py.", "",
+           md_table(["estimator", "songs", "MIREX weighted", "exact", "MIREX per artist group",
                      "fifth", "relative", "parallel", "other"], table), ""]
     (RESULTS / "key_summary.md").write_text("\n".join(out), encoding="utf-8")
     print("\n".join(out))
