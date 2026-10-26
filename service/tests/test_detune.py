@@ -112,6 +112,8 @@ def test_detune_and_quick_key_through_the_api(tmp_path):
     assert d["display"]["display"] == "+23.4 ¢" and d["display"]["fix"] == "pitch by −23.4 ¢ to fix"
     # the quick key only (Centsible's detector): i-VI-III-VII with equal bass notes is genuinely ambiguous between the relative
     # pair, Centsible's documented weak spot; the fused key (milestone 6) adds cadence / bass-tonic evidence for that
-    assert v["key"]["display"]["key"] in ("A Minor", "C Major") and v["key"]["preliminary"] is True
+    assert v["key"]["display"]["key"] in ("A Minor", "C Major")
+    assert v["stages"]["key"] in ("done", "skipped")                 # the fused key replaces the quick key when it runs
+    assert v["key"]["preliminary"] is (v["stages"]["key"] != "done")
     assert {c["key"] for c in v["key"]["candidates"][:2]} == {"A Minor", "C Major"}
     assert v["stages"]["detune_drift"] in ("done", "skipped")
