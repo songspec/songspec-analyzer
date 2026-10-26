@@ -17,7 +17,7 @@ COPY contract contract
 COPY client client
 COPY demo demo
 COPY tools tools
-RUN pip install --no-cache-dir -e "service[redis]" nnAudio==0.3.3 pyyaml \
+RUN pip install --no-cache-dir -e "service[redis]" nnAudio==0.3.3 pyyaml tqdm \
     && python tools/build_native.py \
     && rm -rf build \
     && python tools/fetch_third_party.py       # S-KEY and BTC at pinned commits, weights checked by SHA-256 (optional models)

@@ -334,7 +334,8 @@ def create_app(settings: Settings = None) -> FastAPI:
         root = Path(__file__).resolve().parents[3]
         app.mount("/demo", StaticFiles(directory=root / "demo", html=True), name="demo")
         app.mount("/client", StaticFiles(directory=root / "client"), name="client")
-        app.mount("/cases", StaticFiles(directory=root / "service" / "tests"), name="cases")
+        if (root / "service" / "tests").is_dir():            # the client tests' shared cases (not in the tester zip)
+            app.mount("/cases", StaticFiles(directory=root / "service" / "tests"), name="cases")
         app.add_api_route("/", lambda: RedirectResponse("/demo/"), include_in_schema=False)
 
     return app
