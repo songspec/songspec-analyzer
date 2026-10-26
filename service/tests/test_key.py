@@ -4,7 +4,7 @@ import pytest
 
 from songspec_analyzer.display.key import MODES
 from songspec_analyzer.key.fusion import KeyFusion, candidate_features
-from songspec_analyzer.key.modes import choose_mode
+from songspec_analyzer.key.modes import centsible_mode, choose_mode
 from songspec_analyzer.key.stage import modulation_kind, sections_from_windows, window_keys
 
 
@@ -22,13 +22,14 @@ def scale_chroma(tonic, mode, tonic_w=2.0, noise=0.0, seed=0):
 @pytest.mark.parametrize("mode,minor", [("phrygian", True), ("dorian", True), ("mixolydian", False), ("lydian", False),
                                         ("harmonic_minor", True)])
 def test_choose_mode_finds_clear_modes(mode, minor):
-    got, _ = choose_mode(scale_chroma(5, mode), 5, minor)
+    got, _ = choose_mode(scale_chroma(5, mode), 5, minor, margin=0.05)    # the template machinery (off in production)
     assert got == mode
 
 
 @pytest.mark.parametrize("mode,minor,plain", [("ionian", False, "major"), ("aeolian", True, "minor")])
 def test_plain_scales_stay_plain(mode, minor, plain):
-    assert choose_mode(scale_chroma(0, mode), 0, minor)[0] == plain
+    assert choose_mode(scale_chroma(0, mode), 0, minor, margin=0.05)[0] == plain
+    assert choose_mode(scale_chroma(5, "phrygian"), 5, True)[0] == "minor"   # production default: never
 
 
 def test_window_hmm_finds_a_final_chorus_lift_and_ignores_blips():
@@ -81,3 +82,11 @@ def test_fusion_learns_a_tiebreaker():
     assert fused >= 0.95 and fused > plain
     m2 = KeyFusion.from_dict(m.to_dict())
     assert np.allclose(m2.predict_proba(te[0][0], te[0][1]), m.predict_proba(te[0][0], te[0][1]))
+
+
+def test_centsible_mode_only_when_confident_and_agreeing():
+    d = {"valid": True, "tonic": 5, "minor": True, "degree": 2, "mode_prob": [0.05, 0.1, 0.6, 0.05, 0.05, 0.1, 0.05]}
+    assert centsible_mode(d, 5, True) == "phrygian"
+    assert centsible_mode(dict(d, mode_prob=[0.1, 0.1, 0.45, 0.05, 0.05, 0.2, 0.05]), 5, True) == "minor"   # not confident
+    assert centsible_mode(d, 7, True) == "minor"                         # reported key differs from Centsible's
+    assert centsible_mode(dict(d, degree=5), 5, True) == "minor"         # aeolian is plain minor

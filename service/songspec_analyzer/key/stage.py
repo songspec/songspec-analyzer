@@ -11,13 +11,13 @@ import numpy as np
 from ..display.key import FLAT_NAMES, camelot, house_key, key_display, open_key, sections_display
 from . import KEY_NAMES, estimators as E
 from .fusion import KeyFusion, candidate_features
-from .modes import choose_mode
+from .modes import centsible_mode, choose_mode
 
 MODEL_PATH = Path(__file__).with_name("fusion_model.json")
 AMBIGUOUS_P = 0.45            # below this the key is shown as "ambiguous between A and B"
 WINDOW_BARS, HOP_BARS = 8, 4
-CHANGE_PENALTY = 8.0          # nats to switch key between windows (no flicker)
-MIN_SECTION_BARS = 16
+CHANGE_PENALTY = 24.0         # nats to switch key between windows: 3 % false splits on one-key songs (eval/REPORT.md 3.4)
+MIN_SECTION_BARS = 12        # a final-chorus lift often lasts 8 - 16 bars; not tuned (no section-labelled songs yet)
 
 
 def load_model():
@@ -123,12 +123,12 @@ def stage(ctx):
     beats = np.asarray(tempo["beats"]) if tempo else None
     seq, w = E.tuned_chroma(yh, cents, beats)
     g = E.global_chroma(seq, w)
-    est = {"centsible": np.asarray(ck["key_prob"])}
-    est.update(E.profile_probs(g))
+    y22 = librosa.resample(a.mono, orig_sr=a.sr, target_sr=22050)
+    est = E.estimator_pool(ck["key_prob"], g, ck["chroma_scale"], E.naive_chroma(y22))
     model = load_model()
     prev = ctx.store.get(ctx.aid)["result"].get("key") or {}
     if model is not None:
-        p = model.predict_proba(est, candidate_features(g, ck["chroma_bass"], seq))
+        p = model.predict_proba(est, candidate_features(ck["chroma_scale"], ck["chroma_bass"], seq))
         source = "fusion"
     else:
         p = est["centsible"]
@@ -136,7 +136,7 @@ def stage(ctx):
     order = np.argsort(-p)[:3]
     top = int(order[0])
     tonic, minor = top % 12, top >= 12
-    mode, mscores = choose_mode(g, tonic, minor)
+    mode = centsible_mode(ck, tonic, minor)
     cands = [{"key": KEY_NAMES[int(i)], "p": round(float(p[i]), 3)} for i in order]
     ambiguous = float(p[top]) < AMBIGUOUS_P
     kd = key_display(tonic, mode)
@@ -163,7 +163,7 @@ def stage(ctx):
                          "key": f"{FLAT_NAMES[s['k'] % 12]} {_mode_name(s['mode'])}", "display": house_key(s["k"] % 12, s["mode"])}
                         for s in secs]
     estimators = dict(prev.get("estimators") or {})
-    for n in ("temperley", "albrecht_shanahan", "edma", "krumhansl", "bgate"):
+    for n in ("temperley2005@scale", "albrecht_shanahan@scale", "albrecht_shanahan@beat", "krumhansl@beat", "edma@naive"):
         i = int(np.argmax(est[n]))
         estimators[n] = {"key": KEY_NAMES[i], "p": round(float(est[n][i]), 3)}
     estimators["fusion"] = {"key": KEY_NAMES[top], "p": round(float(p[top]), 3), "source": source}

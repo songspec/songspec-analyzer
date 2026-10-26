@@ -27,8 +27,10 @@ from songspec_analyzer.key.profiles import PROFILES
 
 MODEL = ROOT / "service" / "songspec_analyzer" / "key" / "fusion_model.json"
 SETS = {"centsible": ["centsible"],
-        "centsible+4": ["centsible", "temperley", "edma", "albrecht_shanahan", "bgate"],
-        "all": ["centsible"] + list(PROFILES)}
+        "centsible+AS": ["centsible", "albrecht_shanahan@scale", "albrecht_shanahan@beat"],
+        "centsible+6": ["centsible", "albrecht_shanahan@scale", "albrecht_shanahan@beat", "krumhansl@beat", "krumhansl@naive",
+                        "edma@naive"],
+        "all": ["centsible"] + [f"{p}@{c}" for c in ("beat", "scale", "naive") for p in PROFILES]}
 GRID = list(itertools.product(SETS, (True, False), (0.03, 0.3, 3.0)))
 
 
@@ -39,9 +41,9 @@ def load():
         if not (r["keys"].strip() and p.exists()):
             continue
         f = json.loads(p.read_text(encoding="utf-8"))
-        est = {"centsible": np.asarray(f["centsible"])}
-        est.update(E.profile_probs(np.asarray(f["chroma_beat"])))
-        feats = candidate_features(f["chroma_beat"], f["chroma_bass"], f.get("chroma_beat_seq"))
+        chroma_log = E.global_chroma(f["chroma_beat_seq"])
+        est = E.estimator_pool(f["centsible"], chroma_log, f["chroma_scale"], f["chroma_naive"])
+        feats = candidate_features(f["chroma_scale"], f["chroma_bass"], f.get("chroma_beat_seq"))
         out.append({"r": r, "g": artist_group(r["artist"]), "est": est, "feats": feats,
                     "y": label_index(r["keys"].split(";")[0])})
     return out
@@ -87,7 +89,7 @@ def main():
                 outer_pred[i] = predict(m, d)
         print(f"  group {g}: chose {best}", flush=True)
     fused = [mirex(outer_pred[i], d["y"]) for i, d in enumerate(data)]
-    singles = {n: [mirex(int(np.argmax(d["est"][n])), d["y"]) for d in data] for n in ["centsible"] + list(PROFILES)}
+    singles = {n: [mirex(int(np.argmax(d["est"][n])), d["y"]) for d in data] for n in data[0]["est"]}
     best_single = max(singles, key=lambda n: np.mean([s for s, _ in singles[n]]))
 
     def row(name, res):

@@ -6,7 +6,25 @@ import numpy as np
 from ..display.key import MODES
 
 CANDIDATES = ["ionian", "dorian", "phrygian", "lydian", "mixolydian", "aeolian", "locrian", "harmonic_minor", "phrygian_dominant"]
-MODE_MARGIN = 0.05
+# Measured on the tracker's mode labels (eval/key_modes.py, eval/REPORT.md section 3): no margin makes these chroma templates useful
+# (at best 16 of 34 modal songs found against 20 - 60 false modes), so they never override plain major / minor. The song's mode
+# comes from Centsible's decision instead (centsible_mode, below); the templates remain for experiments.
+MODE_MARGIN = 9.0
+CENTSIBLE_MODE_P = 0.5           # Centsible's mode is reported when its probability reaches this (2 found / 1 false on 128 songs)
+DEGREE_MODES = ["ionian", "dorian", "phrygian", "lydian", "mixolydian", "aeolian", "locrian"]
+
+
+def centsible_mode(key_decision, tonic, minor):
+    """The mode from Centsible's key decision (its tonic degree within the scale) when it is confident and agrees with the reported
+    key; plain 'major' / 'minor' otherwise."""
+    if key_decision and key_decision.get("valid") and int(key_decision["tonic"]) == tonic % 12 \
+            and bool(key_decision["minor"]) == bool(minor):
+        d = int(key_decision["degree"])
+        p = float(key_decision["mode_prob"][d])
+        m = DEGREE_MODES[d]
+        if m not in ("ionian", "aeolian") and p >= CENTSIBLE_MODE_P:
+            return m
+    return "minor" if minor else "major"
 
 
 def template(mode, tonic):

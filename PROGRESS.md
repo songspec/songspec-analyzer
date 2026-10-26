@@ -7,12 +7,12 @@ Plan: `PLAN.md`. Integration guide for SongSpec's main dev: `INTEGRATION.md`.
 | 1 | Scaffold: service, queue, store, upload + limits, cache, SSE, contract, client, demo, INTEGRATION draft | **done** (2026-10-25), see below |
 | 2 | Tempo: BPM Fixer port, Beat This!, house BPM rule | **done** (2026-10-25), see below; >95 % target **not met** (86 %) |
 | 3 | Detune: Centsible pybind11 binding + cross-checks | **done** (2026-10-26), see below |
-| 4 | Key v1 + eval harness + baselines | |
-| 5 | Chords | |
-| 6 | Key v2 (fusion, modes, sections) | |
-| 7 | Link input + Hooktheory | |
+| 4 | Key v1 + eval harness + baselines | **done** (2026-10-26) |
+| 5 | Chords | **v1 done** (own engine, exports); real-music accuracy unmeasured (no chord labels); BTC waits for approval |
+| 6 | Key v2 (fusion, modes, sections) | built; **fusion gate not passed** (0.549 vs Centsible 0.564), Centsible's key ships |
+| 7 | Link input + Hooktheory | links -> metadata -> earlier uploads done; previews blocked by API terms; Hooktheory waits for credentials |
 | 8 | Polish, Docker, final INTEGRATION.md | |
-| 9 | Optional: Fix BPM, mashup helper | |
+| 9 | Optional: Fix BPM, mashup helper | mashup helper done; Fix BPM not started |
 
 ## Milestone 1 (2026-10-25)
 
@@ -81,3 +81,28 @@ CLI with --jobs 1-2 (its default is one file per core). No crash since.
 Waiting on the user:
 - S-KEY (Deezer) is cloned to `third_party/skey` and reviewed, but running downloaded code was blocked by the session's safety check:
   it needs the user's OK.
+
+## Milestones 4 - 7 (2026-10-26)
+
+- **Key v1** (`eval/key_eval.py`): 165 tracker-labelled songs, features cached. Centsible's detector 0.564 MIREX / 45.5 % exact is the
+  best single estimator; the best profile is Temperley 2005 on Centsible's chroma (0.551). Found and fixed: the first tuned chroma was
+  dominated by sub-bass and loud sections (every profile below the naive baseline); log aggregation lifted them by ~0.1.
+- **Key v2** (`eval/key_fusion.py`, nested CV by artist group): the fusion scores 0.549, below Centsible alone; the gate holds, no model
+  is installed, the service reports Centsible's key. Modes: chroma templates add more false modes than they find; the service names a
+  mode only when Centsible's own mode probability is >= 0.5 (75.0 % vs 73.4 % for never). Section keys: 3 % false splits on one-key
+  songs, 27 % of multi-key songs found. Details: `eval/REPORT.md` section 3.
+- **Chords v1**: our own beat-synchronous template + Viterbi engine (full vocabulary, inversions from the bass, roman numerals,
+  summary, repeating progressions) and exports (MIDI with the song's tempo map, ChordPro, TXT) on the server and byte-identical in the
+  client. Tested on rendered progressions (>= 95 % root and major/minor per beat, detuned too); not measured on real music: no chord
+  labels exist for the catalog (Isophonics / Billboard songs are not in it).
+- **Links**: Spotify / Apple Music links resolve to metadata and return the analysis of an earlier upload of the same song (ISRC or
+  artist + title + duration; uploads now store their tags). Otherwise `422 upload_needed`. Previews are not analysed: Apple's terms
+  say previews are streamed only, Deezer's API is non-commercial (`LICENSES.md`).
+- **Mashup helper**: `GET /v1/match?a=&b=` + `client.match()`.
+- Tests: 151 passed (service); client 93 / 93 in the browser.
+
+Waiting on the user (no work is blocked by these, but they decide the next accuracy gains):
+1. Approval to run downloaded third-party code: S-KEY (key) and BTC (chords). Both are MIT-licensed; S-KEY is cloned and reviewed.
+2. Preview analysis vs Apple's / Deezer's terms (SongSpec's legal call).
+3. Hooktheory credentials; a Spotify developer app (optional).
+4. Labelled songs Centsible never saw, or chord annotations, for fair key / chord numbers.

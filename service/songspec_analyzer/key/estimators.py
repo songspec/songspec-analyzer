@@ -32,19 +32,45 @@ def tuned_chroma(yh, tuning_cents, beats=None, hop=512):
     if beats is not None and len(beats) > 8:
         fr = librosa.time_to_frames(np.asarray(beats), sr=SR, hop_length=hop)
         fr = fr[(fr > 0) & (fr < C.shape[1])]
-        C = librosa.util.sync(C, fr, aggregate=np.median)
-        energy = librosa.util.sync(energy[None, :], fr, aggregate=np.mean)[0]
+        # sync returns the stretch BEFORE the first boundary as segment 0: drop it, so row i is beat i (beat i .. beat i+1)
+        C = librosa.util.sync(C, fr, aggregate=np.median)[:, 1:]
+        energy = librosa.util.sync(energy[None, :], fr, aggregate=np.mean)[0][1:]
     return C.T, energy
 
 
-def global_chroma(frames, weights):
-    """Energy-weighted mean of L1-normalised frames; quiet frames (< 5 % of the median energy) are ignored."""
-    w = np.asarray(weights, float)
-    keep = w > 0.05 * np.median(w[w > 0]) if (w > 0).any() else np.ones_like(w, bool)
-    F = frames[keep]
+def global_chroma(frames, weights=None):
+    """Song-level chroma: log-compressed (log1p(100 x / max)), every non-silent frame weighted equally, L1-normalised.
+    Raw magnitudes let one loud sub-bass note (an 808) swamp the scale, and energy weighting lets the loudest section decide; on the
+    catalog (eval/REPORT.md section 3) this aggregation lifted Albrecht-Shanahan from 0.39 to 0.51 MIREX. `weights` only marks
+    silent frames (< 5 % of the median energy), which are left out."""
+    F = np.asarray(frames, float)
+    if weights is not None:
+        w = np.asarray(weights, float)
+        if (w > 0).any():
+            F = F[w > 0.05 * np.median(w[w > 0])]
+    if not len(F):
+        return np.full(12, 1 / 12)
+    F = np.log1p(100.0 * F / (F.max() + 1e-12))
     F = F / (F.sum(axis=1, keepdims=True) + 1e-12)
-    g = (F * w[keep, None]).sum(axis=0)
+    g = F.sum(axis=0)
     return g / (g.sum() + 1e-12)
+
+
+def naive_chroma(y22):
+    """librosa's default chroma_cqt averaged over the song (no tuning, no HPSS): kept as an estimator input because it carries
+    information the tuned chroma does not (it was the best single profile input before the log aggregation)."""
+    import librosa
+    c = librosa.feature.chroma_cqt(y=y22, sr=SR).mean(axis=1)
+    return c / (c.sum() + 1e-12)
+
+
+def estimator_pool(centsible_key_prob, chroma_log, chroma_scale, chroma_naive):
+    """Every estimator the fusion can use: Centsible's decision and each profile on three chromas (name '<profile>@<chroma>')."""
+    est = {"centsible": np.asarray(centsible_key_prob, float)}
+    for tag, c in (("beat", chroma_log), ("scale", chroma_scale), ("naive", chroma_naive)):
+        for name, p in profile_probs(np.asarray(c, float)).items():
+            est[f"{name}@{tag}"] = p
+    return est
 
 
 def profile_scores(chroma, profile):

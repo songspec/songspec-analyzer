@@ -123,8 +123,9 @@ def key_quick(ctx):
     p = np.asarray(d["key_prob"])
     order = np.argsort(-p)[:3]
     cands = [{"key": house_key(int(i % 12), "minor" if i >= 12 else "major"), "p": round(float(p[i]), 3)} for i in order]
-    mode = MODE_BY_DEGREE[d["degree"]]
     tonic = int(d["tonic"])
+    from ..key.modes import centsible_mode
+    mode = centsible_mode(d, tonic, d["minor"])                # only when Centsible is confident (eval/REPORT.md section 3)
     kd = key_display(tonic, mode)
     top = float(p[order[0]])
     ambiguous = top < 0.45
@@ -135,10 +136,10 @@ def key_quick(ctx):
         out["detune"] = detune
     out["key"] = {
         "tonic": FLAT_NAMES[tonic], "scale": "minor" if d["minor"] else "major",
-        "mode": None if mode in ("ionian", "aeolian") else mode.capitalize(),
+        "mode": None if mode in ("major", "minor") else mode.replace("_", " ").title(),
         "confidence": round(top, 3), "ambiguous": ambiguous, "camelot": kd["camelot"], "open_key": kd["open_key"],
         "candidates": cands, "sections": [], "modulations": [],
-        "estimators": {"centsible": {"key": cands[0]["key"], "p": cands[0]["p"], "mode": mode,
+        "estimators": {"centsible": {"key": cands[0]["key"], "p": cands[0]["p"], "mode": MODE_BY_DEGREE[d["degree"]],
                                      "mode_prob": [round(x, 3) for x in d["mode_prob"]]}},
         "metadata": {}, "preliminary": True,
         "display": {"key": kd["key"], "note": kd["note"], "ambiguity_text": amb_text},

@@ -92,3 +92,72 @@ Target (PLAN.md): MAE < 2 cents. **Met** (0.27 / 0.64).
   20 shifts within 0.96 cents.
 - The one large error is *CASPER* under Rubber Band (35 cents): a harmonic alias, the failure mode Centsible's own REPORT
   documents on dense mixes, reported with a wide interval (1.1 cents on the original).
+
+## 3. Key (milestones 4 and 6, 2026-10-26)
+
+Ground truth: the tracker's main key (first listed) for the 165 catalog songs that have one; keys compared by pitch class. Metric:
+MIREX weighted score (exact 1, fifth 0.5, relative 0.3, parallel 0.2), the mir_eval convention. The catalog has only 23 artists, so
+every trained model is evaluated by **nested cross-validation over 5 song-balanced artist groups** (a song is always predicted by a
+model that never saw its artist and was never tuned on it). A first single held-out split (`sha1(artist) % 5`) was replaced before
+any model was chosen: it put 37 % of the songs in held-out and left dev folds of 68 / 28 / 6 / 2 songs.
+
+### 3.1 Single estimators (`eval/key_eval.py`, `eval/key_fusion.py`)
+
+| estimator | MIREX | exact |
+|---|---|---|
+| **Centsible's detector** (Temperley scale + bass tonic; via the binding) | **0.564** | 45.5 % |
+| Temperley 2005 on Centsible's peak chroma | 0.551 | 42.4 % |
+| Albrecht-Shanahan on Centsible's peak chroma | 0.532 | 40.0 % |
+| Albrecht-Shanahan on the service's tuned beat chroma (log aggregation) | 0.511 | 40.0 % |
+| Krumhansl on the service's tuned beat chroma | 0.495 | 36.4 % |
+| naive baseline: Krumhansl on librosa's default `chroma_cqt` (no tuning, no HPSS) | 0.489 | 38.2 % |
+| EDMA (Faraldo, EDM profile) on the naive chroma | 0.473 | 35.8 % |
+
+(All 30 profile x chroma combinations: `eval/results/key_fusion.md`.) Essentia's KeyExtractor, key-cnn and madmom could not be run
+here (no Windows wheel / not installed / non-commercial licence); S-KEY is cloned but waits for approval to run downloaded code.
+
+A bug found on the way: the first tuned chroma summed raw CQT magnitude and weighted frames by energy, so one loud sub-bass note (an
+808) and the loudest section decided the profile match; every profile on it scored *below* the naive baseline (Albrecht-Shanahan
+0.390). Log aggregation with equal frame weights fixed it (0.511). That variant was picked among five on all 165 songs (in-sample).
+
+### 3.2 Fusion (rotation-equivariant logistic regression, tiebreaker features; `eval/key_fusion.py`)
+
+| | MIREX (nested CV) | exact |
+|---|---|---|
+| fusion | 0.549 | 44.2 % |
+| Centsible's detector alone | **0.564** | 45.5 % |
+
+**The gate is not passed**: the fusion is worse than the best single estimator (better on 9 songs, worse on 14), so no fusion model is
+installed and the service reports Centsible's key. Two caveats, both against Centsible being the fair winner: Centsible's tonic
+weights were refitted on 140 of these same 165 songs (its own REPORT, section 8), so its 0.564 is partly in-sample while the fusion's
+score is strictly out-of-artist; on songs it had never seen, Centsible's REPORT measured 0.586 / 44.8 % exact. A fair comparison
+needs labelled songs Centsible never saw.
+
+What would most likely move the key (not built yet, in order): S-KEY (waits for approval), a chord-based key estimator fed by the
+chord engine (cadences, first / last chord), stems (Demucs: bass and vocals apart), more labelled songs (the tracker has 57,857 keys;
+the missing piece is matching audio).
+
+### 3.3 Modes (`eval/key_modes.py`)
+Mode labels: the tracker's asterisk + the mode named in the notes (34 modal songs, 94 plain, 37 unclear). With the tonic given:
+
+| rule | accuracy | modal songs found | false modes |
+|---|---|---|---|
+| never report a mode | 73.4 % | 0 / 34 | 0 |
+| chroma templates, best margin | 66.4 % at most | 6 - 16 | 20 - 60 |
+| **Centsible's mode when its probability >= 0.5** (shipped) | **75.0 %** | 2 / 34 | 1 |
+
+The templates are off; the service names a mode only when Centsible is confident (threshold picked on all songs). Detecting the
+tracker's Phrygian songs (22 of the 34) is an open problem.
+
+### 3.4 Section keys (`eval/key_sections.py`)
+Songs the tracker lists with several keys vs one key; window HMM over 8-bar windows (hop 4) of the tuned beat chroma.
+
+| change penalty (nats) | multi-key songs split (of 30) | one-key songs split falsely (of 134) |
+|---|---|---|
+| 8 | 16 (53 %) | 32 (24 %) |
+| 16 | 11 (37 %) | 19 (14 %) |
+| **24 (shipped)** | **8 (27 %)** | **4 (3 %)** |
+| 48 | 6 (20 %) | 1 (1 %) |
+
+Shipped at 24 (chosen on all songs): a wrong "C Minor / F Major" misleads more than a missed key change. Most of the tracker's key
+changes are not found; the ones that are tend to be clear (intros, last-chorus lifts).
