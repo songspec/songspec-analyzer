@@ -72,7 +72,7 @@ Built:
 Results (`eval/REPORT.md` section 2):
 - Parity with `centsible_cli.exe`: 39 lossless files, max 0.005 cents (target 0.5).
 - Exactly shifted real music: service MAE 0.27 cents (resample) / 0.64 (Rubber Band), 100 % / 99.1 % within 2 cents (target: MAE < 2).
-- Tests: 115 passed.
+- Tests: 114 passed.
 
 Machine: the PC crashed three times under sustained full-CPU load (Kernel-Power 41; one bugcheck 0x13A KERNEL_MODE_HEAP_CORRUPTION; the
 first on 2026-10-24, before this project). Since then every evaluation runs at below-normal priority on 4 threads and the Centsible
