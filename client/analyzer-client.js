@@ -157,11 +157,30 @@ export function createClient({ baseUrl = "", apiKey = null, headers = {}, fetch:
 
   const version = async () => (await request("/v1/version")).json();
 
+  /** Fix BPM: BPM Fixer's engine makes the song run at one tempo. Resolves when the file is ready: {id, fix, download}.
+   *  options: {target_bpm, signature, bpm_mode: "quarter"|"felt", format: "mp3"|"wav"|"flac"|..., keep_edges, loudness}.
+   *  The fixed file: fetch(base + result.download) (or exportBlob-style), kept 24 h for the requester only. */
+  async function fixBpm(file, { options = {}, onUpdate = () => {}, signal, fileName = null } = {}) {
+    const form = new FormData();
+    form.append("file", file, fileName || file.name || "upload");
+    form.append("options", JSON.stringify(options));
+    let v = await (await request("/v1/fix-bpm", { method: "POST", body: form, signal })).json();
+    onUpdate(v);
+    while (!TERMINAL.has(v.status)) {
+      await sleep(pollInterval, signal);
+      v = await (await request(`/v1/fix-bpm/${encodeURIComponent(v.id)}`, { signal })).json();
+      onUpdate(v);
+    }
+    if (v.status === "error") throw new AnalyzerError(422, "fix_failed", v.error || "Fix BPM failed");
+    return { ...v, downloadUrl: base + v.download };
+  }
+
   /** Mashup helper: how to make analysis b sit on analysis a (semitones, cents, tempo ratio, Camelot). Both must be done. */
   const match = async (a, b) =>
     (await request(`/v1/match?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`)).json();
 
-  return { start, startLink, get, watch, analyzeFile, analyzeLink, analyzeQueue, exportUrl, exportBlob, feedback, version, match };
+  return { start, startLink, get, watch, analyzeFile, analyzeLink, analyzeQueue, exportUrl, exportBlob, feedback, version, match,
+    fixBpm };
 }
 
 // ------------------------------------------------------------------------------------------------ helpers

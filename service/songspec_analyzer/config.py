@@ -48,8 +48,14 @@ class Settings:
     def db_path(self) -> Path:
         return self.data_dir / "analyzer.sqlite3"
 
+    @property
+    def fixed_dir(self) -> Path:
+        """Fix BPM outputs, kept for the requester until the audio TTL."""
+        return self.data_dir / "fixed"
+
     def ensure_dirs(self):
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
+        self.fixed_dir.mkdir(parents=True, exist_ok=True)
 
 
 _settings = None

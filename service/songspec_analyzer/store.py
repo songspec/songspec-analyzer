@@ -58,7 +58,7 @@ class Store:
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.executescript(_SCHEMA)
         cols = {r[1] for r in self._db.execute("PRAGMA table_info(analyses)")}
-        for col in ("norm_title", "norm_artist"):          # added with link input (milestone 7); older databases get them here
+        for col in ("norm_title", "norm_artist", "output_path"):   # added later (links, Fix BPM); older databases get them here
             if col not in cols:
                 self._db.execute(f"ALTER TABLE analyses ADD COLUMN {col} TEXT")
         self._db.execute("CREATE INDEX IF NOT EXISTS ix_meta ON analyses(norm_artist, norm_title)")
@@ -155,7 +155,9 @@ class Store:
         with self._lock:
             rows = self._db.execute("SELECT id, audio_path FROM analyses WHERE audio_path IS NOT NULL AND created_at < ?",
                                     (older_than,)).fetchall()
-        return [(r["id"], r["audio_path"]) for r in rows]
+            outs = self._db.execute("SELECT id, output_path FROM analyses WHERE output_path IS NOT NULL AND created_at < ?",
+                                    (older_than,)).fetchall()
+        return [(r["id"], r["audio_path"], "audio_path") for r in rows] + [(r["id"], r["output_path"], "output_path") for r in outs]
 
     def stale_jobs(self):
         """Jobs left queued/running by a process that died (restart recovery)."""

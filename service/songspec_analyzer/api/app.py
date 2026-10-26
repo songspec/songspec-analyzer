@@ -72,7 +72,7 @@ def create_app(settings: Settings = None) -> FastAPI:
         for aid in store.stale_jobs():                        # restart recovery: re-run jobs whose audio is still here
             row = store.get(aid)
             if row["audio_path"] and os.path.isfile(row["audio_path"]):
-                queue.submit(aid)
+                queue.submit(aid, "fix" if row["source"] == "fix-bpm" else "analysis")
             else:
                 store.update(aid, status="error", error="The service restarted before this analysis finished. Please try again.")
         state.update(store=store, queue=queue, sweeper=sweeper,
@@ -230,6 +230,78 @@ def create_app(settings: Settings = None) -> FastAPI:
         state["store"].add_feedback(aid, field, str(value)[:200], (body.get("comment") or "")[:1000] or None,
                                     request.headers.get("x-songspec-user"))
         return {"ok": True}
+
+    # ------------------------------------------------------------------ Fix BPM (BPM Fixer's process() on the server)
+    @app.post("/v1/fix-bpm", status_code=202)
+    async def fix_bpm(request: Request, file: UploadFile = File(...), options: str = Form(None)):
+        """Make a song run at one constant BPM: BPM Fixer's own engine (Rubber Band R3). Options (JSON): target_bpm (default: the
+        song's median), signature ('Auto', '4/4', '6/8' ...), bpm_mode ('quarter' | 'felt'), format ('mp3', 'wav', 'flac', ...),
+        keep_edges (leave intro / outro untouched), loudness (keep the original loudness)."""
+        from ..tempo.fixbpm import FORMATS, rubberband_path
+        from ..tempo._bpmfix_fix import HAVE_PYLIBRB
+        key = client_key(request)
+        if not rubberband_path() and not HAVE_PYLIBRB:
+            raise ApiError(501, "fix_unavailable", "Fix BPM is not available on this server (Rubber Band is not installed).")
+        try:
+            o = json.loads(options) if options else {}
+        except ValueError:
+            raise ApiError(422, "bad_options", "options must be a JSON object")
+        opts = {"target_bpm": float(o["target_bpm"]) if o.get("target_bpm") else None,
+                "signature": str(o.get("signature", "Auto")), "bpm_mode": "felt" if o.get("bpm_mode") == "felt" else "quarter",
+                "format": o.get("format", "mp3") if o.get("format", "mp3") in FORMATS else "mp3",
+                "keep_edges": bool(o.get("keep_edges", True)), "loudness": bool(o.get("loudness", True))}
+        check_rate(key)
+        name = Path(file.filename or "upload").name
+        dest = settings.uploads_dir / f"{uuid.uuid4().hex}_{name}"
+        limit, size = int(settings.max_upload_mb * 1024 * 1024), 0
+        try:
+            with open(dest, "wb") as f:
+                while True:
+                    chunk = await file.read(1 << 20)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > limit:
+                        raise ApiError(413, "too_large", f"Files up to {settings.max_upload_mb:g} MB are accepted.")
+                    f.write(chunk)
+            dur = await asyncio.to_thread(probe_duration, str(dest))
+            if dur is not None and dur > settings.max_duration_s + 1:
+                raise ApiError(413, "too_long", f"Songs up to {settings.max_duration_s / 60:g} minutes are accepted.")
+        except BaseException:
+            dest.unlink(missing_ok=True)
+            raise
+        store = state["store"]
+        aid = store.create("fix-bpm", file_name=name, options=opts, audio_path=str(dest))
+        state["queue"].submit(aid, "fix")
+        return fix_view(store.get(aid))
+
+    def fix_view(row):
+        res = row["result"]
+        out = {"id": row["id"], "status": row["status"], "error": row.get("error"), "options": row["options"],
+               "progress": res.get("progress"), "fix": res.get("fix")}
+        if row["status"] == "done" and row.get("output_path"):
+            out["download"] = f"/v1/fix-bpm/{row['id']}/download"
+        return out
+
+    def get_fix(aid):
+        row = state["store"].get(aid)
+        if row is None or row["source"] != "fix-bpm":
+            raise ApiError(404, "not_found", "no such Fix BPM job")
+        return row
+
+    @app.get("/v1/fix-bpm/{aid}")
+    async def fix_status(aid: str):
+        return fix_view(get_fix(aid))
+
+    @app.get("/v1/fix-bpm/{aid}/download")
+    async def fix_download(aid: str):
+        from fastapi.responses import FileResponse
+        row = get_fix(aid)
+        p = row.get("output_path")
+        if row["status"] != "done" or not p or not os.path.isfile(p):
+            raise ApiError(409 if row["status"] != "done" else 410, "not_ready" if row["status"] != "done" else "expired",
+                           "not finished yet" if row["status"] != "done" else "the fixed file has expired (24 h)")
+        return FileResponse(p, filename=os.path.basename(p).split("_", 1)[-1])     # without the upload's id prefix
 
     # ------------------------------------------------------------------ mashup helper
     @app.get("/v1/match")

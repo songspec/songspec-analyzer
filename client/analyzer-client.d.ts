@@ -83,6 +83,19 @@ export interface AnalyzerClient {
   feedback(id: string, field: "key" | "bpm" | "detune" | "signature" | "chords" | "other", correct: string, comment?: string | null): Promise<void>;
   version(): Promise<{ engine: string; schema: string; formats: string[]; limits: { max_upload_mb: number; max_duration_s: number } }>;
   match(a: string, b: string): Promise<MatchAdvice>;
+  fixBpm(file: Blob, opts?: { options?: FixOptions; onUpdate?: (v: FixJob) => void; signal?: AbortSignal; fileName?: string }):
+    Promise<FixJob & { downloadUrl: string }>;
+}
+
+export interface FixOptions { target_bpm?: number; signature?: string; bpm_mode?: "quarter" | "felt";
+  format?: "mp3" | "wav" | "wav16" | "flac" | "aiff" | "m4a" | "ogg"; keep_edges?: boolean; loudness?: boolean }
+export interface FixJob {
+  id: string; status: "queued" | "running" | "done" | "error"; error?: string | null; options: FixOptions;
+  progress?: { stage: string; message: string } | null; download?: string;
+  fix?: { target_bpm: number; signature: string; file_name: string;
+          stretch: { slowest: number; fastest: number; pct_over_20: number; heavy: [number, number, number][] };
+          verify: { on_grid_pct: number; median_ms: number; with_hit_pct: number } | null;
+          irregularity_before_pct: number; log: string[] };
 }
 
 export interface MatchAdvice {

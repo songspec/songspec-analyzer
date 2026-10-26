@@ -5,7 +5,7 @@
 FROM python:3.12-slim
 
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools build-essential cmake \
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools rubberband-cli build-essential cmake \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
