@@ -14,8 +14,21 @@ import tempfile
 from pathlib import Path
 
 os.environ["SONGSPEC_DEVICE"] = "cpu"
+os.environ.setdefault("OMP_NUM_THREADS", "4")
 
 import numpy as np
+
+# Gentle on the machine: the exe time-stretches whole songs and both sides run Beat This! on the CPU (a full-load run once
+# coincided with a PC crash). Below-normal priority for this process and the exe, 4 torch threads.
+BELOW_NORMAL = 0x00004000
+if sys.platform == "win32":
+    import ctypes
+    ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), BELOW_NORMAL)
+try:
+    import torch
+    torch.set_num_threads(4)
+except ImportError:
+    pass
 
 from common import RESULTS, cached, load_labels, md_table
 
@@ -30,7 +43,8 @@ def run_exe(path):
     with tempfile.TemporaryDirectory() as td:
         r = subprocess.run([str(EXE), "--cli", str(path), "--machine", "--no-verify", "--signature", "Auto",
                             "--format", "WAV 16-bit", "--out-dir", td], capture_output=True, text=True, timeout=3600,
-                           encoding="utf-8", errors="replace")
+                           encoding="utf-8", errors="replace",
+                           creationflags=BELOW_NORMAL if sys.platform == "win32" else 0)
     for line in r.stdout.splitlines():
         if line.startswith("@@RESULT "):
             d = json.loads(line[9:])

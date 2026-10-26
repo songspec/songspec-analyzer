@@ -111,8 +111,19 @@ What the product brief asks the page to offer, as *suggestions* (your design dec
 | Preview-based warning (link input) | `warnings[]`, `track.source` ends in `-preview` |
 | "This is wrong" button | `POST …/feedback` |
 
-### Tempo fields in one paragraph
-`tempo.bpm` is the house-rule BPM (80–160, except compound meters 6/8, 9/8, 12/8, which keep the felt beat and set `compound: true`). `tempo.display.bpm` is the string to show: `"114"`, `"82.5"`, or `"~122 - 127"` when the song is played live. In that case `tempo.feel` is `"live"`, `tempo.range` is set, and `tempo.display.note` says `"BPM inconsistent - played live"`. A genuine **beat switch** (e.g. 100 → 140 BPM, confirmed by the bar length changing too) gives several `tempo.sections`, each with its own `bpm`. `tempo.beats` / `tempo.downbeats` are the cleaned grid (BPM Fixer's engine), good for a click track and for drawing bar lines. `tempo.curve` is per-beat tempo for a graph (BPM Fixer draws it blue, with the target green). `tempo.display.alternates` are ½× / 2× chips, plus the quarter-note BPM for compound meters ("what your DAW shows").
+### Tempo fields
+`tempo.display.bpm` is the string to show. It follows the conventions of SongSpec's own BPM & Key tracker:
+
+| song | `tempo.display.bpm` | `tempo.display.note` |
+|---|---|---|
+| steady | `128` | – |
+| moderately inconsistent | `~98.1` | `BPM moderately inconsistent` |
+| played live / drifting | `~122 - 127` | `BPM inconsistent - played live` |
+| beat switch (sections in order) | `153 / 104` | e.g. `Intro BPM inconsistent - played live` for an unsteady part |
+| 3/4 | `120*` | `Played in 3/4 time signature` |
+| 6/8, 9/8, 12/8 (compound) | `180*` = the eighth-note tempo, not folded | `Played in 6/8 time signature` |
+
+`tempo.bpm` is the main section's number under the house rule (80–160; compound meters unfolded, `compound: true`). `tempo.sections[]` holds one entry per beat-switch part (`start`, `end`, felt `bpm`, `lo`/`hi` local tempo, `steadiness`: `steady` / `moderate` / `live`). A switch is only reported when the bar length changes with the beat, so a half-time passage or a 6/8 counting mix-up is not a switch. `tempo.feel` is `"live"` when any section is. `tempo.beats` / `tempo.downbeats` are the cleaned grid from BPM Fixer's engine, good for a click track and bar lines. `tempo.curve` is per-beat felt tempo for a graph (BPM Fixer draws it blue, with the target green). `tempo.display.alternates` are chips: ½× / 2×, or for compound meters "147 (in 4/4)" (the tracker's "may work in 4/4 at …") and the quarter-note value.
 
 The audio for playback stays in the user's browser (the `File` they dropped). The service never sends audio back.
 

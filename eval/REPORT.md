@@ -30,8 +30,18 @@ The steadiness flag is the **weak part**. `eval/tempo_tune.py` shows that the dr
 
 **Parity with the shipped BPM Fixer:** `eval/tempo_parity.py` runs the installed `bpmfix-cli.exe` and the service on the same songs (both CPU) and compares the beat grids. See section 1.1 for the result. The unit-level parity (`service/tests/test_tempo.py`) asserts that every ported function's source is identical to `bpmfix.py` and that the beat grid equals the original's step by step on six synthetic cases (steady, half-time level, drift, missed beats, half-time passage, 3/4).
 
-### 1.1 Parity run
-(filled in by `eval/tempo_parity.py`, see `eval/results/tempo_parity.md`)
+### 1.1 Parity run (installed `bpmfix-cli.exe` vs the service, both on the CPU, signature Auto)
+
+| song | signature exe / ours | beats exe / ours | max difference |
+|---|---|---|---|
+| 01 - POP OUT | 4/4 / 4/4 | 388 / 388 | 0.0 ms |
+| 01 - Quadeca - NO QUESTIONS ASKED | 4/4 / 4/4 | 832 / 832 | 1.0 ms (3-decimal rounding) |
+| 01 - Quadeca - sorry4dying | 4/4 / 4/4 | 632 / 632 | 0.0 ms |
+| 01 Drake - Make Them Cry | 4/4 / 4/4 | 414 / 414 | 0.0 ms |
+| 01 ☆ Dark Magic | 4/4 / 4/4 | 406 / 406 | 0.0 ms |
+| 01-01 - Brain Fog | 4/4 / 4/4 | 351 / 351 | 0.0 ms |
+
+**6 / 6 identical beat grids.** Only 6 songs: the exe also time-stretches every song (minutes each), and a first full-speed run coincided with a PC crash, so this runs at below-normal priority one song at a time. More songs: `eval/tempo_parity.py --limit N` (results are cached per song). On GPU the tracker's floating point differs slightly from the CPU, so the service on a GPU host is "BPM Fixer's engine on GPU beats", not bit-identical to the exe.
 
 ### 1.2 Remaining misses (16 songs match none of the listed BPMs)
 - **Compound meters not recognised (5):** the tracker says 6/8 for *tell me a joke*, *picking up hands*, *Are We Still Friends*, *GUIDE DOG*, *MONDAY*; the tracker's 6/8 value is the eighth-note tempo (176–191). The service reads them as 4/4 or 3/4 at another level. `infer_signature` counts tracker beats per bar and, as BPM Fixer's own window says, "can't tell 6/8 from 2/4". This is the largest single error class; a meter classifier (beat-level onset periodicity: 2- vs 3-subdivision) is the planned fix.

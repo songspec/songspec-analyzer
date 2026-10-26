@@ -5,7 +5,7 @@ Plan: `PLAN.md`. Integration guide for SongSpec's main dev: `INTEGRATION.md`.
 | # | milestone | status |
 |---|---|---|
 | 1 | Scaffold: service, queue, store, upload + limits, cache, SSE, contract, client, demo, INTEGRATION draft | **done** (2026-10-25), see below |
-| 2 | Tempo: BPM Fixer port, Beat This!, house BPM rule | next |
+| 2 | Tempo: BPM Fixer port, Beat This!, house BPM rule | **done** (2026-10-25), see below; >95 % target **not met** (86 %) |
 | 3 | Detune: Centsible pybind11 binding + cross-checks | |
 | 4 | Key v1 + eval harness + baselines | |
 | 5 | Chords | |
@@ -37,3 +37,24 @@ Environment facts found during recon:
 - GPU: RTX 4070, but the installed torch is a CPU build.
 
 Known gaps: Docker image and RQ path untested; `fpcalc` missing locally (fingerprint cache untested); link input returns 501 until milestone 7.
+
+## Milestone 2 (2026-10-25): tempo
+
+Built:
+- `tempo/_bpmfix_port.py`: BPM Fixer's analysis functions **copied verbatim** by `tools/port_bpmfix.py` (34 functions, 7 constants; a test asserts every source is identical to `bpmfix.py`). `tempo/engine.py` runs them in `process()`'s order (Beat This! → signature → `prepare_anchors` → level guard → `refine_beats` → `fill_weak_runs`), then adds a precise line-fit BPM, signature confidence, downbeats on the cleaned grid, **beat-switch detection** (on the raw tracker beats, octave-folded; the switch must be a jump, not a ramp, and the bar length must change with it; then BPM Fixer's pipeline runs per section) and per-section **steadiness** measured on the dominant local tempo (level hops are ignored).
+- House BPM display matched to the user's tracker data (`153 / 104`, `~98.1`, `~122 - 127`, `120*`; compound meters show the eighth-note tempo `180*`, which is what the tracker's 6/8 rows contain). The 80/160 rule is decided on the displayed value (159.98 shows as 80).
+- Beat This! `final0.ckpt` vendored (`tools/fetch_models.py`, SHA-256 manifest, no runtime download).
+- Python 3.12 venv on **BPM Fixer's exact pins** (numpy 2.5.4, scipy 1.18.1, librosa 1.0.0, beat-this 1.1.0) + torch 2.14.1 CUDA 13.0 (RTX 4070). The old 3.11 venv is kept as `.venv311` (ignored); the Docker image moved to Python 3.12.
+- No-beat audio becomes a `skipped` stage with a readable warning, not an error.
+
+Results (`eval/REPORT.md` §1):
+- Catalog, 164 songs with a tracker BPM: **86.0 % within 1 % of the main BPM**, 90.2 % within 1 % of any listed BPM, Acc2 92.7 %. Same audio: Centsible 84.5 %, raw Beat This! 46.3 %, librosa 33.5 %.
+- Beat switches: 0 of 127 single-BPM songs split falsely; 19 of 37 multi-BPM songs flagged.
+- Steadiness ("inconsistent" notes) is weak: 4 of 18 found, 18 of 146 flagged without a note; thresholds kept conservative.
+- Parity with the installed BPM Fixer exe: **6 / 6 songs give the identical beat grid** (same count and signature, 0.0 ms on 5, 1.0 ms rounding on 1).
+- Tests: 105 passed (service), JS formatters 82/82 in the browser.
+
+Not met / open:
+- PLAN target "> 95 % after the house rule": 86 %. Biggest error class: 6/8 songs read as 4/4 or 3/4 (5 of 16 misses), then 3:2 / 4:3 level errors (4). A meter classifier is planned with key v2.
+- GiantSteps Tempo not run yet (needs the dataset download).
+- The PC crashed during the first exe parity run (CPU-heavy: the exe time-stretches while Beat This! runs on the CPU). The parity script now runs at below-normal priority with 4 threads.
