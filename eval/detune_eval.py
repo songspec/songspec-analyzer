@@ -64,6 +64,14 @@ def readings(y, sr):
             "librosa": v.get("librosa", (None,))[0], "fused": m["cents"], "ci": m["ci"]}
 
 
+def with_policy(rd):
+    """'fused' = the service's current rule (detune.fuse), recomputed from the cached per-estimator readings."""
+    from songspec_analyzer.detune import fuse
+    rd = dict(rd)
+    rd["fused"] = fuse({"centsible": (rd.get("centsible"), rd.get("ci") or 0.0), "chroma120": (rd.get("chroma120"), 3.0)})[0]
+    return rd
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--songs", type=int, default=12)
@@ -78,11 +86,11 @@ def main():
     per_song = []
     for k, r in enumerate(rows, 1):
         y, sr = excerpt(r["path"])
-        base = cached("detune_base", r["file"], lambda: readings(y, sr))
+        base = with_policy(cached("detune_base", r["file"], lambda: readings(y, sr)))
         worst = 0.0
         for mname, fn in methods.items():
             for c in SHIFTS:
-                rd = cached(f"detune_{mname}", f"{r['file']}|{c}", lambda: readings(fn(y, sr, c), sr))
+                rd = with_policy(cached(f"detune_{mname}", f"{r['file']}|{c}", lambda: readings(fn(y, sr, c), sr)))
                 for n in NAMES:
                     if rd.get(n) is not None and base.get(n) is not None:
                         e = float(est.wrap(rd[n] - base[n] - c))

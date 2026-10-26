@@ -51,3 +51,44 @@ The steadiness flag is the **weak part**. `eval/tempo_tune.py` shows that the dr
 - **Section order / main tempo (2):** *Summer Love + Set the Mood* "95.9 / 120" (tracker 120;119.87: the 95.9 prelude is real but the tracker lists only the main part), *X* 81.5 vs 140.
 
 Target from PLAN.md: "> 95 % after the house rule on pop/EDM". **Not met**: 86.0 % within 1 % / 89.0 % within 4 % on this catalog (dense trap, 6/8 indie, live-ish pop). GiantSteps Tempo (EDM) is still to be run; the fixes above (compound meter, level choice) are scheduled with key v2 (milestone 6), where the chord/onset features they need are built anyway.
+
+## 2. Detune (milestone 3, 2026-10-26)
+
+### 2.1 Parity with the Centsible plugin's DSP (`eval/detune_parity.py`)
+The service runs Centsible's C++ core through a pybind11 binding (a verbatim copy of `core/`). Against the plugin's own command-line
+analyzer (`centsible_cli.exe`) on the same files, one CLI process per file: the reference pack (8 exactly shifted copies), the two
+A440 test tones and 30 catalog songs.
+
+| files | max abs difference | mean |
+|---|---|---|
+| 39 lossless (WAV / FLAC) | **0.005 cents** (the CLI's CSV prints 2 decimals) | 0.0026 |
+| 1 MP3 (decoded by JUCE in the CLI, by libsndfile in the service) | 0.021 cents | 0.021 |
+
+Requirement: <= 0.5 cents. The fast path the service uses (`analyze_tuning`, the tuning half of `analyzeTrack` without its key and
+tempo passes) is asserted equal to `analyzeTrack`'s reading by `service/tests/test_detune.py`.
+
+### 2.2 Accuracy on exactly shifted real music (`eval/detune_eval.py`)
+12 catalog songs (60 s excerpts from 0:45), each shifted by -49, -37, -25, -12, -3, +3, +12, +25, +37, +49 cents. Error = (reading of
+the shifted copy) - (reading of the original) - shift. Real songs have no known absolute tuning, so this measures what can be
+measured exactly: whether each shift is recovered.
+
+| shift method | estimator | cases | MAE (cents) | median | p95 | max | within 0.5 | within 2 |
+|---|---|---|---|---|---|---|---|---|
+| resample (exact) | Centsible | 108 | 0.255 | 0.175 | 0.846 | 1.17 | 87.0 % | 100.0 % |
+| resample | CQT-120 | 118 | 1.149 | 0.203 | 6.920 | 8.53 | 66.9 % | 86.4 % |
+| resample | librosa `estimate_tuning` | 118 | 5.981 | 2.850 | 25.245 | 45.20 | 16.9 % | 44.9 % |
+| resample | **service** | 118 | **0.270** | 0.180 | 0.864 | **1.17** | 83.9 % | **100.0 %** |
+| Rubber Band R3 pitch shift | Centsible | 101 | 0.687 | 0.260 | 0.930 | 35.10 | 75.2 % | 99.0 % |
+| Rubber Band | CQT-120 | 111 | 1.358 | 0.517 | 7.187 | 8.95 | 48.6 % | 85.6 % |
+| Rubber Band | librosa | 111 | 6.097 | 2.400 | 24.250 | 49.00 | 24.3 % | 47.7 % |
+| Rubber Band | **service** | 111 | **0.641** | 0.250 | 0.930 | 35.10 | 76.6 % | **99.1 %** |
+
+Target (PLAN.md): MAE < 2 cents. **Met** (0.27 / 0.64).
+
+- The service's rule: Centsible's reading whenever it has one; CQT-120 (5-cent interval, low confidence, a warning) when Centsible
+  has too little steady tonal evidence; librosa never decides. A first version let the cross-checks outvote Centsible when its
+  interval was wide; that made the worst case 15x worse (1.17 -> 17.6 cents) and was dropped.
+- One excerpt (*I'm Sorry*) has no Centsible reading at all (loud, dense, few steady peaks): the fallback reads it and recovers all
+  20 shifts within 0.96 cents.
+- The one large error is *CASPER* under Rubber Band (35 cents): a harmonic alias, the failure mode Centsible's own REPORT
+  documents on dense mixes, reported with a wide interval (1.1 cents on the original).

@@ -6,7 +6,7 @@ Plan: `PLAN.md`. Integration guide for SongSpec's main dev: `INTEGRATION.md`.
 |---|---|---|
 | 1 | Scaffold: service, queue, store, upload + limits, cache, SSE, contract, client, demo, INTEGRATION draft | **done** (2026-10-25), see below |
 | 2 | Tempo: BPM Fixer port, Beat This!, house BPM rule | **done** (2026-10-25), see below; >95 % target **not met** (86 %) |
-| 3 | Detune: Centsible pybind11 binding + cross-checks | |
+| 3 | Detune: Centsible pybind11 binding + cross-checks | **done** (2026-10-26), see below |
 | 4 | Key v1 + eval harness + baselines | |
 | 5 | Chords | |
 | 6 | Key v2 (fusion, modes, sections) | |
@@ -58,3 +58,26 @@ Not met / open:
 - PLAN target "> 95 % after the house rule": 86 %. Biggest error class: 6/8 songs read as 4/4 or 3/4 (5 of 16 misses), then 3:2 / 4:3 level errors (4). A meter classifier is planned with key v2.
 - GiantSteps Tempo not run yet (needs the dataset download).
 - The PC crashed during the first exe parity run (CPU-heavy: the exe time-stretches while Beat This! runs on the CPU). The parity script now runs at below-normal priority with 4 threads.
+
+## Milestone 3 (2026-10-26): detune
+
+Built:
+- `service/native/centsible/`: a verbatim copy of Centsible's `core/` plus `binding.cpp` (pybind11): `analyze_track`, `analyze_tuning`
+  (the plugin's reading only), `key_probabilities` (the full key decision: 24 key / 7 mode probabilities, bass and scale chroma),
+  `detune_curve` (the windowed curve Beatswitch draws). `tools/build_native.py` builds it (MSVC here, gcc in Docker).
+- Detune stage: Centsible's reading, CQT-120 and librosa as recorded cross-checks, CQT-120 as the fallback when Centsible has no
+  reading. Quick-key stage: Centsible's detector on the fused tuning (seconds after upload; replaced by the fused key later), which
+  also fills the detune sentence "Plays in Bb Minor (+38.0 ¢ above Bb) ...". Drift stage: tuning per 10 s window, flagged > 5 cents.
+
+Results (`eval/REPORT.md` section 2):
+- Parity with `centsible_cli.exe`: 39 lossless files, max 0.005 cents (target 0.5).
+- Exactly shifted real music: service MAE 0.27 cents (resample) / 0.64 (Rubber Band), 100 % / 99.1 % within 2 cents (target: MAE < 2).
+- Tests: 115 passed.
+
+Machine: the PC crashed three times under sustained full-CPU load (Kernel-Power 41; one bugcheck 0x13A KERNEL_MODE_HEAP_CORRUPTION; the
+first on 2026-10-24, before this project). Since then every evaluation runs at below-normal priority on 4 threads and the Centsible
+CLI with --jobs 1-2 (its default is one file per core). No crash since.
+
+Waiting on the user:
+- S-KEY (Deezer) is cloned to `third_party/skey` and reviewed, but running downloaded code was blocked by the session's safety check:
+  it needs the user's OK.

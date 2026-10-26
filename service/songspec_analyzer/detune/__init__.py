@@ -4,9 +4,10 @@ stage(ctx)        -> `detune`: Centsible's reading (the plugin's DSP), cross-che
 key_quick(ctx)    -> `key` (preliminary): Centsible's two-stage key detector on the tuning-corrected chroma
 drift_stage(ctx)  -> `detune.drift`: tuning per 10 s window (Centsible's detune curve), flagged when it moves > 5 cents
 
-Fusion rule: Centsible's own 95 % interval decides. When it is tight (<= 2 cents) and Centsible does not report two competing
-tunings, its value IS the answer (it is ~15x more accurate than librosa on real music, Centsible REPORT.md); the cross-checks are
-only recorded. Otherwise all estimates enter a weighted circular median (weights 1 / ci^2; cross-checks count as ci 3 / 4 cents).
+Fusion rule (measured, eval/REPORT.md section 2): Centsible's reading IS the answer whenever it has one. On exactly shifted real
+music it recovers every shift with MAE 0.26 cents, CQT-120 with 1.24 and librosa with 6.4; letting the cross-checks vote when
+Centsible's interval was wide made the result worse (max error 1.2 -> 17.6 cents), so they don't. When Centsible has too little steady
+tonal evidence to read anything, CQT-120 answers with a 5-cent interval and low confidence. librosa is recorded, never used.
 """
 import numpy as np
 
@@ -15,8 +16,8 @@ from ..display.key import FLAT_NAMES, house_key, key_display
 from . import estimators as est
 
 MODE_BY_DEGREE = ["ionian", "dorian", "phrygian", "lydian", "mixolydian", "aeolian", "locrian"]
-TIGHT_CI = 2.0
 DRIFT_FLAG_CENTS = 5.0
+FALLBACK_CI = 5.0               # CQT-120 alone: p95 error 7 cents on shifted real music
 
 
 def _core():
@@ -25,17 +26,14 @@ def _core():
 
 
 def fuse(votes):
-    """votes: {name: (cents, ci)} -> (cents, ci, rule)."""
+    """votes: {name: (cents, ci)} -> (cents, ci, rule). Centsible when it has a reading, else CQT-120, else nothing."""
     c = votes.get("centsible")
-    if c and c[0] is not None and c[1] <= TIGHT_CI and not votes.get("_competing"):
+    if c and c[0] is not None:
         return c[0], c[1], "centsible"
-    vals = [vc for k, vc in votes.items() if not k.startswith("_") and vc[0] is not None]
-    if not vals:
-        return None, None, "none"
-    w = [1.0 / max(ci, 0.5) ** 2 for _, ci in vals]
-    m = est.circ_wmedian([v for v, _ in vals], w)
-    spread = max(abs(est.wrap(v - m)) for v, _ in vals)
-    return m, max(min(ci for _, ci in vals), spread), "weighted circular median"
+    q = votes.get("chroma120")
+    if q and q[0] is not None:
+        return q[0], max(q[1], FALLBACK_CI), "chroma120 (no Centsible reading)"
+    return None, None, "none"
 
 
 CROSS_CHECK_SECONDS = 90.0      # the cross-checks read the middle 90 s (they only matter when Centsible is unsure)
@@ -56,9 +54,7 @@ def measure(y, sr, cross_checks=True):
     t = core.analyze_tuning(y, sr) if hasattr(core, "analyze_tuning") else core.analyze_track(y, sr)["tuning"]
     r = {"tuning": t}
     out = {"centsible": r, "votes": {}, "cents": None, "ci": None, "rule": "none", "harmonic": None}
-    if not t["valid"]:
-        return out
-    votes = {"centsible": (round(t["cents"], 2), t["ci_cents"]), "_competing": t["competing"]}
+    votes = {"centsible": (round(t["cents"], 2), t["ci_cents"]) if t["valid"] else (None, 0.0)}
     if cross_checks:
         yh = est.harmonic_22k(_middle(y, sr, CROSS_CHECK_SECONDS), sr)
         out["harmonic"] = yh
@@ -77,23 +73,26 @@ def stage(ctx):
     r = m["centsible"]
     ctx.data["centsible"] = r
     t = r["tuning"]
-    if not t["valid"]:
-        from ..pipeline import StageSkipped
-        raise StageSkipped("No steady tonal content found - detune can't be measured on this file.")
     ctx.data["harmonic_22k"] = m["harmonic"]
     cents, ci, rule = m["cents"], m["ci"], m["rule"]
+    if cents is None:
+        from ..pipeline import StageSkipped
+        raise StageSkipped("No steady tonal content found - detune can't be measured on this file.")
     c120, lib = m["votes"]["chroma120"][0], m["votes"]["librosa"][0]
     ctx.data["tuning_cents"] = cents
     secondary = None
-    if t["has_secondary"]:
+    if t["valid"] and t["has_secondary"]:
         secondary = {"cents": round(t["secondary_cents"], 1), "share": round(t["secondary_share"], 3)}
+    confidence = float(t["confidence"]) if t["valid"] else 0.2
+    if not t["valid"]:
+        ctx.warnings.append("Detune is approximate: the song has little steady tonal content (read with the 120-bin chroma).")
     disp = detune_display(cents)                 # key_text is added by the key stage once the key is known
     return {"detune": {
-        "cents": round(cents, 1), "ci_cents": round(ci, 2), "confidence": round(float(t["confidence"]), 3),
+        "cents": round(cents, 1), "ci_cents": round(ci, 2), "confidence": round(confidence, 3),
         "semitones": 0, "total_cents": None, "a4_hz": disp["a4_hz"],
-        "drift": [], "drift_flag": bool(t["has_drift"]), "secondary": secondary,
-        "estimators": {"centsible": round(t["cents"], 2), "chroma120": None if c120 is None else round(c120, 2),
-                       "librosa": round(lib, 2)},
+        "drift": [], "drift_flag": bool(t["valid"] and t["has_drift"]), "secondary": secondary,
+        "estimators": {"centsible": round(t["cents"], 2) if t["valid"] else None,
+                       "chroma120": None if c120 is None else round(c120, 2), "librosa": round(lib, 2)},
         "fusion": rule, "locked": bool(t["locked"]), "competing": bool(t["competing"]),
         "display": disp,
     }}

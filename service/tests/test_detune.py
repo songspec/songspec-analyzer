@@ -71,13 +71,12 @@ def test_key_probabilities_match_centsibles_own_decision():
 
 
 def test_fusion_rule():
-    assert fuse({"centsible": (12.3, 0.4), "chroma120": (20.0, 3.0), "librosa": (25.0, 4.0)})[:2] == (12.3, 0.4)
-    c, ci, rule = fuse({"centsible": (12.3, 6.0), "chroma120": (14.0, 3.0), "librosa": (15.0, 4.0)})
-    assert rule == "weighted circular median" and 13.9 <= c <= 15.1
-    c, _, _ = fuse({"centsible": (49.0, 5.0), "chroma120": (-49.0, 3.0), "librosa": (-48.0, 4.0)})   # across the wrap
-    assert abs(est.wrap(c + 49.0)) <= 1.5
-    c, _, rule = fuse({"centsible": (10.0, 0.3), "_competing": True, "chroma120": (12.0, 3.0), "librosa": (11.0, 4.0)})
-    assert rule == "weighted circular median"
+    """Measured policy (eval/REPORT.md section 2): Centsible whenever it reads, even with a wide interval; CQT-120 otherwise."""
+    assert fuse({"centsible": (12.3, 0.4), "chroma120": (20.0, 3.0), "librosa": (25.0, 4.0)}) == (12.3, 0.4, "centsible")
+    assert fuse({"centsible": (12.3, 6.0), "chroma120": (14.0, 3.0), "librosa": (15.0, 4.0)}) == (12.3, 6.0, "centsible")
+    c, ci, rule = fuse({"centsible": (None, 0.0), "chroma120": (14.0, 3.0), "librosa": (15.0, 4.0)})
+    assert (c, ci) == (14.0, 5.0) and rule.startswith("chroma120")
+    assert fuse({"centsible": (None, 0.0), "chroma120": (None, 0), "librosa": (3.0, 4.0)})[0] is None   # librosa never decides
 
 
 @needs_core
