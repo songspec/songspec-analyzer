@@ -161,3 +161,11 @@ Songs the tracker lists with several keys vs one key; window HMM over 8-bar wind
 
 Shipped at 24 (chosen on all songs): a wrong "C Minor / F Major" misleads more than a missed key change. Most of the tracker's key
 changes are not found; the ones that are tend to be clear (intros, last-chorus lifts).
+
+### 3.5 Chord-based key evidence (`eval/chord_feat.py`, `service/.../key/chordkey.py`)
+The chord engine ran on all 165 labelled songs (cached beats and tunings). Per candidate key: diatonic chord time, tonic-triad time,
+first / last chord, cadences into the tonic (incl. minor v -> i).
+- On its own (fixed weights): MIREX **0.426**, 27.4 % exact: weaker than every profile on Centsible's chroma, which says more about
+  the template chord engine on dense real mixes than about the idea (BTC would be the test; it waits for approval to run).
+- As fusion features (nested CV now also chooses none / tiebreak / chords / both): fusion **0.549** again, vs Centsible 0.564
+  (better on 6 songs, worse on 9). The inner CV picks the chord features for one group of five. **Gate still not passed.**
