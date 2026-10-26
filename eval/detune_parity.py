@@ -24,16 +24,17 @@ PACK = ROOT / "Everything Claude Needs" / "Centsible Source"
 wrap = lambda c: c - 100.0 * np.floor((c + 50.0) / 100.0)
 
 
-def cli_batch(paths):
+def cli_one(path):
+    """One file per CLI process: the CLI writes its CSV only at the very end, so in a batch one failing file loses every row."""
     with tempfile.TemporaryDirectory() as td:
         out = Path(td) / "c.csv"
-        subprocess.run([str(CLI), "--jobs", CLI_JOBS, "--csv", str(out)] + [str(p) for p in paths], capture_output=True, timeout=7200,
-                       creationflags=CREATIONFLAGS)
-        rows = {}
+        p = subprocess.run([str(CLI), "--jobs", "1", "--csv", str(out), str(path)], capture_output=True, timeout=1800,
+                           creationflags=CREATIONFLAGS, text=True, encoding="utf-8", errors="replace")
+        if not out.exists():
+            return {"error": f"exit {p.returncode}: {(p.stderr or p.stdout)[-300:]}"}
         with open(out, encoding="utf-8", errors="replace") as f:
-            for r in csv.DictReader(f):
-                rows[Path(r["file"]).name] = r
-        return rows
+            rows = list(csv.DictReader(f))
+        return rows[0] if rows else {"error": "no row"}
 
 
 def ours(path):
@@ -48,13 +49,13 @@ def main():
     a = ap.parse_args()
     files = sorted((PACK / "reference-pack").glob("*.wav")) + sorted((PACK / "test-tones").glob("*.wav"))
     files += [r["path"] for r in load_labels() if r["path"].exists()][:a.limit]
-    cli = cached("centsible_cli_parity", "|".join(p.name for p in files), lambda: cli_batch(files))
     table, diffs, lossy = [], [], []
-    for p in files:
-        c = cli.get(p.name)
+    for i, p in enumerate(files, 1):
+        c = cached("centsible_cli_one", p.name, lambda: cli_one(p))
         o = cached("centsible_binding", p.name, lambda: ours(p))
-        if not c or not c.get("cents"):
-            table.append([p.name[:50], "no CLI row", f"{o['cents']:+.2f}", "", "", ""])
+        print(f"[{i}/{len(files)}] {p.name[:50]}  cli {c.get('cents', c.get('error'))}  service {o['cents']:+.2f}", flush=True)
+        if not c.get("cents"):
+            table.append([p.name[:50], f"CLI: {c.get('error', 'no reading')[:60]}", f"{o['cents']:+.2f}", "", "", ""])
             continue
         d = float(wrap(o["cents"] - float(c["cents"])))
         is_lossy = p.suffix.lower() in (".mp3", ".m4a", ".aac", ".ogg")

@@ -49,6 +49,16 @@ def test_centsible_reads_known_tuning(cents):
 
 
 @needs_core
+def test_analyze_tuning_is_analyze_tracks_tuning():
+    """The service's fast path (tuning only) must read exactly what analyzeTrack (the CLI / plugin file analysis) reads."""
+    for cents in (7.5, -31.0):
+        y, sr = pad(cents, seconds=30)
+        full = _centsible.analyze_track(y, sr)["tuning"]
+        fast = _centsible.analyze_tuning(y, sr)
+        assert fast == full
+
+
+@needs_core
 def test_key_probabilities_match_centsibles_own_decision():
     """The binding repeats estimateKey's model weights; this catches a drift between the two copies."""
     for cents, minor in ((12.0, True), (-20.0, False)):

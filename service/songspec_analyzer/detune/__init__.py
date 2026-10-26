@@ -38,16 +38,29 @@ def fuse(votes):
     return m, max(min(ci for _, ci in vals), spread), "weighted circular median"
 
 
+CROSS_CHECK_SECONDS = 90.0      # the cross-checks read the middle 90 s (they only matter when Centsible is unsure)
+
+
+def _middle(y, sr, seconds):
+    n = int(seconds * sr)
+    if len(y) <= n:
+        return y
+    a = (len(y) - n) // 2
+    return y[a:a + n]
+
+
 def measure(y, sr, cross_checks=True):
-    """Every estimator on one mono signal -> dict(centsible=<analyze_track result>, votes, cents, ci, rule, harmonic)."""
-    r = _core().analyze_track(y, sr)
-    t = r["tuning"]
+    """Every estimator on one mono signal -> dict(centsible={'tuning': ...}, votes, cents, ci, rule, harmonic).
+    Centsible reads the whole track (its interval tightens with more audio); the cross-checks read the middle 90 s."""
+    core = _core()
+    t = core.analyze_tuning(y, sr) if hasattr(core, "analyze_tuning") else core.analyze_track(y, sr)["tuning"]
+    r = {"tuning": t}
     out = {"centsible": r, "votes": {}, "cents": None, "ci": None, "rule": "none", "harmonic": None}
     if not t["valid"]:
         return out
     votes = {"centsible": (round(t["cents"], 2), t["ci_cents"]), "_competing": t["competing"]}
     if cross_checks:
-        yh = est.harmonic_22k(y, sr)
+        yh = est.harmonic_22k(_middle(y, sr, CROSS_CHECK_SECONDS), sr)
         out["harmonic"] = yh
         c120, _ = est.chroma120(yh)
         lib, _ = est.librosa_tuning(yh)
@@ -74,8 +87,7 @@ def stage(ctx):
     secondary = None
     if t["has_secondary"]:
         secondary = {"cents": round(t["secondary_cents"], 1), "share": round(t["secondary_share"], 3)}
-    k = r["key"]
-    disp = detune_display(cents, None, k["root"] if k["valid"] else None, _mode(k) if k["valid"] else None)
+    disp = detune_display(cents)                 # key_text is added by the key stage once the key is known
     return {"detune": {
         "cents": round(cents, 1), "ci_cents": round(ci, 2), "confidence": round(float(t["confidence"]), 3),
         "semitones": 0, "total_cents": None, "a4_hz": disp["a4_hz"],
@@ -87,8 +99,13 @@ def stage(ctx):
     }}
 
 
-def _mode(k):
-    return MODE_BY_DEGREE[k["degree"]] if 0 <= k.get("degree", -1) < 7 else ("minor" if k["minor"] else "major")
+def with_key_text(detune, tonic, mode):
+    """The detune section with its 'Plays in Bb Minor (+38.0 ¢ above Bb) ...' sentence for this key."""
+    if not detune or detune.get("cents") is None:
+        return detune
+    d = dict(detune)
+    d["display"] = detune_display(d["cents"], d.get("total_cents"), tonic, mode)
+    return d
 
 
 def key_quick(ctx):
@@ -113,7 +130,11 @@ def key_quick(ctx):
     top = float(p[order[0]])
     ambiguous = top < 0.45
     amb_text = f"ambiguous between {cands[0]['key']} and {cands[1]['key']}" if ambiguous else None
-    return {"key": {
+    out = {}
+    detune = with_key_text(ctx.store.get(ctx.aid)["result"].get("detune"), tonic, mode)
+    if detune:
+        out["detune"] = detune
+    out["key"] = {
         "tonic": FLAT_NAMES[tonic], "scale": "minor" if d["minor"] else "major",
         "mode": None if mode in ("ionian", "aeolian") else mode.capitalize(),
         "confidence": round(top, 3), "ambiguous": ambiguous, "camelot": kd["camelot"], "open_key": kd["open_key"],
@@ -122,7 +143,8 @@ def key_quick(ctx):
                                      "mode_prob": [round(x, 3) for x in d["mode_prob"]]}},
         "metadata": {}, "preliminary": True,
         "display": {"key": kd["key"], "note": kd["note"], "ambiguity_text": amb_text},
-    }}
+    }
+    return out
 
 
 def drift_stage(ctx):

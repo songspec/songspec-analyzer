@@ -37,3 +37,6 @@ eval/results/
 # compiled bindings (tools/build_native.py)
 *.pyd
 *.so
+
+# third-party code fetched for evaluation (see LICENSES.md)
+third_party/

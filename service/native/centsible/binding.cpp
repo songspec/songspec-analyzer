@@ -79,6 +79,23 @@ PYBIND11_MODULE (_centsible, m)
         return d;
     }, py::arg ("mono"), py::arg ("sample_rate"), "centsible::analyzeTrack (whole-track tuning, key, tempo)");
 
+    m.def ("analyze_tuning", [] (const F32& x, double sr)
+    {
+        // the tuning half of analyzeTrack, exactly as it runs there (Analyzer fed in 4096-sample blocks; the estimator works hop by
+        // hop, so the block size does not change the reading), without the key and tempo passes the service does elsewhere
+        auto v = mono (x);
+        centsible::Reading rd;
+        {
+            py::gil_scoped_release nogil;
+            centsible::Analyzer analyzer;
+            analyzer.prepare (sr);
+            for (std::size_t pos = 0; pos < v.size(); pos += 4096)
+                analyzer.push (v.data() + pos, (int) std::min<std::size_t> (4096, v.size() - pos));
+            rd = analyzer.reading();
+        }
+        return tuningDict (rd);
+    }, py::arg ("mono"), py::arg ("sample_rate"), "the plugin's tuning reading only (centsible::Analyzer over the whole track)");
+
     m.def ("key_probabilities", [] (const F32& x, double sr, double tuningCents)
     {
         // exactly what estimateKey (track_features.cpp) computes, returning the whole decision instead of the summary

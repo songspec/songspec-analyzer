@@ -1,0 +1,111 @@
+"""Independent key estimators. Each returns a 24-way probability vector indexed tonic + 12 * minor (0 = C major, 12 = C minor,
+21 = A minor), so they can be compared, stacked and fused.
+
+profiles   correlation of the tuning-corrected, beat-synchronous chroma with every profile in profiles.py, softmaxed
+centsible  Centsible's two-stage detector (Temperley scale + bass tonic), via the binding (computed in the quick-key stage)
+skey       S-KEY (Deezer, ICASSP 2025; MIT code, weights shipped in the same repo), third_party/skey
+"""
+import sys
+from pathlib import Path
+
+import numpy as np
+
+from .profiles import PROFILES
+
+SR = 22050
+ROOT = Path(__file__).resolve().parents[3]
+
+
+def softmax(x, temp=1.0):
+    z = np.asarray(x, float) / temp
+    z = np.exp(z - z.max())
+    return z / z.sum()
+
+
+def tuned_chroma(yh, tuning_cents, beats=None, hop=512):
+    """Chroma (CQT, 36 bins/octave, C1-C8) of the harmonic signal at 22.05 kHz, measured against the song's tuning.
+    With beats: one frame per beat (median), so a long held note counts per beat, not per frame. Returns (frames x 12, weights)."""
+    import librosa
+    C = librosa.feature.chroma_cqt(y=yh, sr=SR, hop_length=hop, tuning=float(tuning_cents) / 100.0, bins_per_octave=36,
+                                   n_octaves=7, fmin=librosa.note_to_hz("C1"), norm=None)
+    energy = np.sqrt((C ** 2).sum(axis=0))
+    if beats is not None and len(beats) > 8:
+        fr = librosa.time_to_frames(np.asarray(beats), sr=SR, hop_length=hop)
+        fr = fr[(fr > 0) & (fr < C.shape[1])]
+        C = librosa.util.sync(C, fr, aggregate=np.median)
+        energy = librosa.util.sync(energy[None, :], fr, aggregate=np.mean)[0]
+    return C.T, energy
+
+
+def global_chroma(frames, weights):
+    """Energy-weighted mean of L1-normalised frames; quiet frames (< 5 % of the median energy) are ignored."""
+    w = np.asarray(weights, float)
+    keep = w > 0.05 * np.median(w[w > 0]) if (w > 0).any() else np.ones_like(w, bool)
+    F = frames[keep]
+    F = F / (F.sum(axis=1, keepdims=True) + 1e-12)
+    g = (F * w[keep, None]).sum(axis=0)
+    return g / (g.sum() + 1e-12)
+
+
+def profile_scores(chroma, profile):
+    """Pearson correlation of a 12-bin chroma with the profile rotated to every key -> 24 scores (index tonic + 12 * minor)."""
+    maj, minr = (np.asarray(p, float) for p in PROFILES[profile])
+    out = np.zeros(24)
+    for t in range(12):
+        out[t] = np.corrcoef(chroma, np.roll(maj, t))[0, 1]
+        out[12 + t] = np.corrcoef(chroma, np.roll(minr, t))[0, 1]
+    return np.nan_to_num(out, nan=-1.0)
+
+
+def profile_probs(chroma, temp=0.1):
+    """{profile name: 24 probabilities}. temp: softmax temperature over correlations (refit by the fusion calibration)."""
+    return {name: softmax(profile_scores(chroma, name), temp) for name in PROFILES}
+
+
+# ------------------------------------------------------------------------------------------------ S-KEY
+_SKEY = {}
+
+
+def skey_available():
+    return (ROOT / "third_party" / "skey" / "skey" / "models" / "skey.pt").exists()
+
+
+def _skey_load(device):
+    if "m" in _SKEY:
+        return _SKEY["m"]
+    import torch
+    sys.path.insert(0, str(ROOT / "third_party" / "skey"))
+    from skey.key_detection import key_map, load_model_components
+    ckpt_path = ROOT / "third_party" / "skey" / "skey" / "models" / "skey.pt"
+    try:
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)      # no arbitrary pickle code
+    except Exception:
+        raise RuntimeError("S-KEY checkpoint does not load with weights_only=True; refusing to unpickle it")
+    hcqt, chromanet, crop = load_model_components(ckpt, torch.device(device))
+    from ..display.key import parse_key
+    index = []
+    for i in range(24):
+        tonic, mode = parse_key(key_map[i])
+        index.append(tonic + (12 if mode == "minor" else 0))
+    _SKEY["m"] = (hcqt, chromanet, crop, int(ckpt["audio"]["sr"]), np.array(index), device)
+    return _SKEY["m"]
+
+
+def skey_probs(y, sr, device="cpu"):
+    """S-KEY on a mono signal -> 24 probabilities in our index order (softmax of the time-averaged logits)."""
+    import torch
+    import torchaudio
+    hcqt, chromanet, crop, ksr, index, dev = _skey_load(device)
+    x = torch.from_numpy(np.ascontiguousarray(y, dtype=np.float32))[None, :]
+    if sr != ksr:
+        x = torchaudio.functional.resample(x, sr, ksr)
+    m = x.abs().max()
+    if m > 0:
+        x = x / m
+    with torch.no_grad():
+        logits = chromanet(crop(hcqt(x.unsqueeze(0).to(dev)), torch.zeros(1).to(dev)))
+        lg = torch.mean(logits, dim=0).cpu().numpy().ravel()
+    p_theirs = softmax(lg)
+    out = np.zeros(24)
+    out[index] = p_theirs
+    return out
