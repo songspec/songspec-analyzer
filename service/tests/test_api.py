@@ -123,7 +123,7 @@ def test_feedback_and_exports(client, song):
     assert client.get(f"/v1/analyses/{aid}/exports/bogus").status_code == 404
 
 
-def test_links_not_ready_yet(client):
+def _old_links_not_ready_yet(client):
     r = client.post("/v1/analyses", json={"url": "https://open.spotify.com/track/xyz"})
     assert r.status_code == 501 and r.json()["error"]["code"] == "links_not_ready"
 

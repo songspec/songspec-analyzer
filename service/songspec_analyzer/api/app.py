@@ -29,8 +29,8 @@ OPTION_KEYS = {"high_accuracy": bool, "signature": str, "hooktheory": bool}
 FEEDBACK_FIELDS = ("key", "bpm", "detune", "signature", "chords", "other")
 
 
-def _err(status, code, message, headers=None):
-    return JSONResponse({"error": {"code": code, "message": message}}, status_code=status, headers=headers)
+def _err(status, code, message, headers=None, extra=None):
+    return JSONResponse({"error": {"code": code, "message": message, **(extra or {})}}, status_code=status, headers=headers)
 
 
 def public_view(row):
@@ -89,7 +89,7 @@ def create_app(settings: Settings = None) -> FastAPI:
 
     @app.exception_handler(ApiError)
     async def _api_error(request, e: ApiError):
-        return _err(e.status, e.code, e.message, e.headers)
+        return _err(e.status, e.code, e.message, e.headers, e.extra)
 
     def client_key(request: Request):
         if settings.api_keys:

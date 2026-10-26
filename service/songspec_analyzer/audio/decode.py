@@ -61,6 +61,27 @@ def probe_duration(path):
     return None
 
 
+def read_tags(path):
+    """{'title', 'artist', 'isrc'} from the file's own metadata (ffprobe; ID3 TSRC / Vorbis ISRC). Missing values are None."""
+    import json
+    fp = find_ffmpeg("ffprobe")
+    out = {"title": None, "artist": None, "isrc": None}
+    if not fp:
+        return out
+    try:
+        r = subprocess.run([fp, "-v", "error", "-show_entries", "format_tags", "-of", "json", str(path)],
+                           capture_output=True, text=True, timeout=30, encoding="utf-8", errors="replace")
+        tags = {k.lower(): v for k, v in (json.loads(r.stdout).get("format", {}).get("tags") or {}).items()}
+    except Exception:
+        return out
+    out["title"] = tags.get("title")
+    out["artist"] = tags.get("artist") or tags.get("album_artist")
+    isrc = tags.get("isrc") or tags.get("tsrc")
+    if isrc and len(isrc.replace("-", "")) == 12:
+        out["isrc"] = isrc.replace("-", "").upper()
+    return out
+
+
 def load_audio(path) -> Audio:
     err = None
     try:

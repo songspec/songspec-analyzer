@@ -53,10 +53,15 @@ def _decode(ctx: Context):
     if ctx.audio.duration < 5.0:
         raise AudioError("This file is shorter than 5 seconds - too short to analyse.")
     fp, _ = chromaprint(path)
-    ctx.store.update(ctx.aid, fingerprint=fp, duration=round(ctx.audio.duration, 3))
+    from ..audio.decode import read_tags
+    from ..links.resolve import norm, primary_artist
+    tags = read_tags(path)
+    ctx.store.update(ctx.aid, fingerprint=fp, duration=round(ctx.audio.duration, 3), isrc=tags["isrc"],
+                     norm_title=norm(tags["title"]) or None, norm_artist=primary_artist(tags["artist"]) or None)
     track = dict(row["result"].get("track") or {})
     track.update(duration=round(ctx.audio.duration, 3), sample_rate=ctx.audio.sr, channels=int(ctx.audio.samples.shape[1]),
-                 fingerprint=fp)
+                 fingerprint=fp, title=track.get("title") or tags["title"], artist=track.get("artist") or tags["artist"],
+                 isrc=track.get("isrc") or tags["isrc"])
     return {"track": track}
 
 

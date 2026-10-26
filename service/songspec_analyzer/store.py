@@ -57,6 +57,12 @@ class Store:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.executescript(_SCHEMA)
+        cols = {r[1] for r in self._db.execute("PRAGMA table_info(analyses)")}
+        for col in ("norm_title", "norm_artist"):          # added with link input (milestone 7); older databases get them here
+            if col not in cols:
+                self._db.execute(f"ALTER TABLE analyses ADD COLUMN {col} TEXT")
+        self._db.execute("CREATE INDEX IF NOT EXISTS ix_meta ON analyses(norm_artist, norm_title)")
+        self._db.commit()
 
     # ---------------------------------------------------------------- analyses
     def create(self, source, file_name=None, options=None, audio_path=None, isrc=None):
@@ -121,6 +127,26 @@ class Store:
         with self._lock:
             for where, args in tries:
                 row = self._db.execute(q.format(where), (ENGINE_VERSION, exclude or "", *args)).fetchone()
+                if row:
+                    return self._row(row)
+        return None
+
+    def find_by_meta(self, isrc=None, norm_title=None, norm_artist=None, duration=None):
+        """A finished full-file analysis of the song a link points to: by ISRC, else by normalised artist + title (+ duration within
+        3 s when both are known). Only uploads count (never another link's result)."""
+        q = ("SELECT * FROM analyses WHERE status = 'done' AND engine_version = ? AND source = 'upload' AND {} "
+             "ORDER BY updated_at DESC LIMIT 1")
+        with self._lock:
+            if isrc:
+                row = self._db.execute(q.format("isrc = ?"), (ENGINE_VERSION, isrc)).fetchone()
+                if row:
+                    return self._row(row)
+            if norm_title and norm_artist:
+                where, args = "norm_title = ? AND norm_artist = ?", [norm_title, norm_artist]
+                if duration:
+                    where += " AND (duration IS NULL OR ABS(duration - ?) <= 3.0)"
+                    args.append(duration)
+                row = self._db.execute(q.format(where), (ENGINE_VERSION, *args)).fetchone()
                 if row:
                     return self._row(row)
         return None
