@@ -22,3 +22,16 @@ Status per component: **ship** = verified and fine to serve; **eval only** = use
 | Demucs | stems | MIT | – | not used yet |
 | BTC, Chordino | chords | to verify | – | not used yet |
 | chromaprint (`fpcalc`) | fingerprint cache | LGPL-2.1 (separate executable) | – | ship (Docker image) |
+
+## Streaming services (link input)
+
+| service | what we use | what the terms say (read 2026-10-26) | status |
+|---|---|---|---|
+| Apple (iTunes Search / Lookup API) | metadata for a pasted link | lookups may be cached ("large websites should set up caching logic"), ~20 calls/minute. Previews: promotional use only, near a store badge, attributed "provided courtesy of iTunes", and "streamed only, and not downloaded, saved, cached" (performance-partners.apple.com/search-api) | **metadata: ship. Server-side preview analysis: not allowed as written**; needs Apple's OK or a legal decision |
+| Deezer API | nothing yet | "strictly limited for a non-commercial purpose", no direct or indirect revenue (developers.deezer.com/termsofuse) | **not used** while SongSpec is treated as commercial |
+| Spotify oEmbed | title + cover of a pasted link | public embed metadata | ship |
+| Spotify Web API | artists, duration, ISRC (only with credentials) | Developer Terms to be read before enabling; dev-mode apps need the owner's Premium | off until credentials and a read of the terms |
+| Hooktheory TheoryTab API | key / BPM cross-check (milestone 7b) | needs an account and its terms | off until credentials |
+
+Result: a link returns the full analysis when the same song was uploaded before (ISRC or artist + title + duration), else asks for
+the file (`422 upload_needed` with the track it found). The brief's preview route waits for SongSpec's decision.

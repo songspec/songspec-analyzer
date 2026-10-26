@@ -55,7 +55,9 @@ Auth options: (a) put the service behind your backend and call it server-to-serv
 
 Options: `high_accuracy` (bool, stem separation), `signature` (force a time signature, e.g. `"6/8"`), `hooktheory` (bool, default on when configured).
 
-Errors are always `{"error": {"code", "message"}}`, and `message` is safe to show to users. Codes: `no_input`, `too_large` (413), `too_long` (413), `empty_file`, `rate_limited` (429, with `Retry-After`), `unauthorized` (401), `not_found`, `not_ready` (409), `links_not_ready` (501, until milestone 7). A file that can't be decoded becomes an analysis with `status: "error"` and a readable `error`.
+Errors are always `{"error": {"code", "message", ...}}`, and `message` is safe to show to users. Codes: `no_input`, `too_large` (413), `too_long` (413), `empty_file`, `rate_limited` (429, with `Retry-After`), `unauthorized` (401), `not_found`, `not_ready` (409), `bad_link` (422), `upload_needed` (422, see below), `link_lookup_failed` (502). A file that can't be decoded becomes an analysis with `status: "error"` and a readable `error`.
+
+**Links** (`{"url": "https://open.spotify.com/track/..."}` or an Apple Music song link): the service looks the song up (title, artist, duration, ISRC). If anyone uploaded that song before, the response is that full analysis at once (`cached: true`, `track.link` describes the link). Otherwise it's `422 upload_needed`, with `error.track` = `{title, artist, isrc, duration, link: {service, id, url, thumbnail}}`, so the page can say "Found *X* by *Y*: upload the file to analyse it". 30-second previews are **not** analysed (Apple's and Deezer's terms, see `LICENSES.md`); that's SongSpec's decision to make.
 
 Caching: the exact same file returns instantly (`cached: true`). The same song in another file is matched by Chromaprint fingerprint when `fpcalc` is installed (included in the Docker image).
 
