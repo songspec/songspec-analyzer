@@ -121,15 +121,18 @@ export function sectionsDisplay(sections, labels = null) {
 // ------------------------------------------------------------------------------------------------ BPM
 export const COMPOUND = new Set(["6/8", "9/8", "12/8"]);
 export const LIVE_NOTE = "BPM inconsistent - played live";
+export const MODERATE_NOTE = "BPM moderately inconsistent";
 const r2 = (x) => Math.round(x * 100) / 100;
+const r1 = (x) => Math.round(x * 10) / 10;
 
-/** House rule: <80 doubled, >=160 halved, compound meters keep the felt value. -> {bpm, compound} */
+/** House rule: <80 doubled, >=160 halved (on the displayed value); compound meters show the eighth-note tempo (3 x the
+ *  dotted-quarter feel), unfolded. raw = felt BPM. -> {bpm, compound} */
 export function houseBpm(raw, signature = "4/4") {
   if (!(raw > 0) || !Number.isFinite(raw)) return { bpm: null, compound: false };
-  if (COMPOUND.has(signature)) return { bpm: r2(raw), compound: true };
+  if (COMPOUND.has(signature)) return { bpm: r2(raw * 3), compound: true };
   let b = raw;
-  while (b < 80) b *= 2;
-  while (b >= 160) b /= 2;
+  while (r1(b) < 79.95) b *= 2;
+  while (r1(b) >= 159.95) b /= 2;
   return { bpm: r2(b), compound: false };
 }
 
@@ -140,24 +143,50 @@ export function fmtBpm(b) {
   return Math.abs(b - r) <= 0.05 + 1e-9 ? String(r) : b.toFixed(1);
 }
 
-/** -> {bpm, display, note, compound, range} */
-export function bpmDisplay(raw, signature = "4/4", sections = null, live = false) {
+const half = (x) => Math.round(x * 2) / 2;
+
+/** One section's text: "128", "~98.1" (moderately inconsistent), "~122 - 127" (played live); "*" for non-4/4 meters. */
+export function sectionText(sec, signature = "4/4") {
+  const { bpm } = houseBpm(sec.bpm, signature);
+  if (bpm == null) return "N/A";
+  const star = signature && signature !== "4/4" ? "*" : "";
+  const st = sec.steadiness || "steady";
+  if (st === "live" && sec.lo && sec.hi) {
+    const f = bpm / sec.bpm, lo = half(sec.lo * f), hi = half(sec.hi * f);
+    if (fmtBpm(lo) !== fmtBpm(hi)) return `~${fmtBpm(lo)} - ${fmtBpm(hi)}${star}`;
+  }
+  if (st === "live" || st === "moderate") return `~${fmtBpm(bpm)}${star}`;
+  return `${fmtBpm(bpm)}${star}`;
+}
+
+function where(i, n, sec) {
+  if (n === 1) return "";
+  if (i === 0) return "Intro ";
+  if (i === n - 1) return "Outro ";
+  const m = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t) % 60).padStart(2, "0")}`;
+  return `${m(sec.start)}-${m(sec.end)} `;
+}
+
+/** raw = main section's felt BPM; sections = tempo.sections (start, end, bpm, lo, hi, steadiness).
+ *  -> {bpm, display, note, compound, range}; "153 / 104" for a beat switch. */
+export function bpmDisplay(raw, signature = "4/4", sections = null) {
   const { bpm, compound } = houseBpm(raw, signature);
-  const out = { bpm, display: fmtBpm(bpm), note: null, compound, range: null };
-  if (live && sections && sections.length >= 2) {
-    let vals = sections.filter((s) => s.bpm).map((s) => houseBpm(s.bpm, signature).bpm);
-    vals = vals.map((v) => (v < 0.75 * bpm ? v * 2 : v > 1.5 * bpm ? v / 2 : v));
-    const lo = Math.min(...vals), hi = Math.max(...vals);
-    if (Math.round(hi) - Math.round(lo) >= 2) {
-      out.range = [r2(lo), r2(hi)];
-      out.display = `~${Math.round(lo)} - ${Math.round(hi)}`;
-      out.note = LIVE_NOTE;
+  const star = signature && signature !== "4/4" ? "*" : "";
+  const out = { bpm, display: bpm != null ? fmtBpm(bpm) + star : null, note: null, compound, range: null };
+  const notes = [];
+  if (sections && sections.length) {
+    out.display = sections.map((s) => sectionText(s, signature)).join(" / ");
+    sections.forEach((s, i) => {
+      if (s.steadiness === "live") notes.push(where(i, sections.length, s) + LIVE_NOTE);
+      else if (s.steadiness === "moderate") notes.push(where(i, sections.length, s) + MODERATE_NOTE);
+    });
+    if (sections.length === 1 && sections[0].steadiness === "live") {
+      const f = bpm / sections[0].bpm;
+      out.range = [r2(sections[0].lo * f), r2(sections[0].hi * f)];
     }
   }
-  if (signature && signature !== "4/4") {
-    const sig = `Played in ${signature} time signature`;
-    out.note = out.note ? `${out.note}. ${sig}` : sig;
-  }
+  if (signature && signature !== "4/4") notes.push(`Played in ${signature} time signature`);
+  out.note = notes.map((n) => n[0].toUpperCase() + n.slice(1)).join(". ") || null;
   return out;
 }
 

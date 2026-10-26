@@ -780,7 +780,21 @@
             }
           ],
           "default": null,
+          "description": "std / mean of the beat intervals, %",
           "title": "Irregularity Pct"
+        },
+        "drift_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "how far the smoothed tempo moves over the song (p95 - p5), %",
+          "title": "Drift Pct"
         },
         "feel": {
           "anyOf": [
@@ -796,6 +810,7 @@
             }
           ],
           "default": null,
+          "description": "'live' = played live / drifting, 'grid' = quantized",
           "title": "Feel"
         },
         "beats": {
@@ -895,6 +910,7 @@
     },
     "TempoSection": {
       "additionalProperties": true,
+      "description": "One part of the song between beat switches (the usual song has exactly one).",
       "properties": {
         "start": {
           "title": "Start",
@@ -905,9 +921,59 @@
           "type": "number"
         },
         "bpm": {
-          "description": "raw felt BPM of the section",
+          "description": "felt BPM of the section (before the house rule)",
           "title": "Bpm",
           "type": "number"
+        },
+        "lo": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "p10 of the local tempo, felt BPM",
+          "title": "Lo"
+        },
+        "hi": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "p90 of the local tempo, felt BPM",
+          "title": "Hi"
+        },
+        "drift_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(hi - lo) / median, %",
+          "title": "Drift Pct"
+        },
+        "steadiness": {
+          "default": "steady",
+          "description": "tracker words: '128' / '~98' / '~97 - 100'",
+          "enum": [
+            "steady",
+            "moderate",
+            "live"
+          ],
+          "title": "Steadiness",
+          "type": "string"
         }
       },
       "required": [

@@ -46,23 +46,39 @@
      "labels": null,
      "expect_key": "Bb Minor", "expect_note": null}
   ],
+  "_house_bpm_comment": "raw = felt tempo (dotted quarters in 6/8, 9/8, 12/8). Compound meters show the tracker's eighth-note value with '*'.",
   "house_bpm": [
     {"raw": 57, "sig": "4/4", "bpm": 114, "display": "114"},
     {"raw": 165, "sig": "4/4", "bpm": 82.5, "display": "82.5"},
     {"raw": 160, "sig": "4/4", "bpm": 80, "display": "80"},
-    {"raw": 159.99, "sig": "4/4", "bpm": 159.99, "display": "160"},
+    {"raw": 159.96, "sig": "4/4", "bpm": 79.98, "display": "80"},
+    {"raw": 79.97, "sig": "4/4", "bpm": 79.97, "display": "80"},
     {"raw": 79.9, "sig": "4/4", "bpm": 159.8, "display": "159.8"},
     {"raw": 35, "sig": "4/4", "bpm": 140, "display": "140"},
     {"raw": 128.04, "sig": "4/4", "bpm": 128.04, "display": "128"},
     {"raw": 128.06, "sig": "4/4", "bpm": 128.06, "display": "128.1"},
-    {"raw": 62, "sig": "6/8", "bpm": 62, "display": "62"},
-    {"raw": 174, "sig": "12/8", "bpm": 174, "display": "174"}
+    {"raw": 120, "sig": "3/4", "bpm": 120, "display": "120*"},
+    {"raw": 60, "sig": "6/8", "bpm": 180, "display": "180*"},
+    {"raw": 71, "sig": "12/8", "bpm": 213, "display": "213*"}
   ],
-  "bpm_live": [
-    {"raw": 124.5, "sig": "4/4", "sections": [122.2, 124.0, 126.8], "display": "~122 - 127", "note": "BPM inconsistent - played live"},
-    {"raw": 124.5, "sig": "4/4", "sections": [61.1, 124.0, 126.8], "display": "~122 - 127", "note": "BPM inconsistent - played live"},
-    {"raw": 120.0, "sig": "4/4", "sections": [120.0, 120.4], "display": "120", "note": null},
-    {"raw": 92.0, "sig": "6/8", "sections": [], "display": "92", "note": "Played in 6/8 time signature"}
+  "_bpm_sections_comment": "sections in time order; steadiness steady | moderate | live (from the tempo engine).",
+  "bpm_sections": [
+    {"raw": 124.5, "sig": "4/4", "sections": [{"start": 0, "end": 200, "bpm": 124.5, "lo": 122.2, "hi": 126.8, "steadiness": "live"}],
+     "display": "~122 - 127", "note": "BPM inconsistent - played live", "range": [122.2, 126.8]},
+    {"raw": 62.0, "sig": "4/4", "sections": [{"start": 0, "end": 200, "bpm": 62.0, "lo": 60.9, "hi": 63.4, "steadiness": "live"}],
+     "display": "~122 - 127", "note": "BPM inconsistent - played live", "range": [121.8, 126.8]},
+    {"raw": 98.1, "sig": "4/4", "sections": [{"start": 0, "end": 200, "bpm": 98.1, "lo": 97.2, "hi": 99.0, "steadiness": "moderate"}],
+     "display": "~98.1", "note": "BPM moderately inconsistent", "range": null},
+    {"raw": 120.0, "sig": "4/4", "sections": [{"start": 0, "end": 200, "bpm": 120.0, "lo": 119.9, "hi": 120.1, "steadiness": "steady"}],
+     "display": "120", "note": null, "range": null},
+    {"raw": 153.0, "sig": "4/4", "sections": [{"start": 0, "end": 90, "bpm": 153.0, "steadiness": "steady"},
+                                              {"start": 90, "end": 200, "bpm": 104.0, "steadiness": "steady"}],
+     "display": "153 / 104", "note": null, "range": null},
+    {"raw": 140.0, "sig": "4/4", "sections": [{"start": 0, "end": 30, "bpm": 90.0, "lo": 85.1, "hi": 95.2, "steadiness": "live"},
+                                              {"start": 30, "end": 200, "bpm": 140.0, "steadiness": "steady"}],
+     "display": "~85 - 95 / 140", "note": "Intro BPM inconsistent - played live", "range": null},
+    {"raw": 60.0, "sig": "6/8", "sections": [{"start": 0, "end": 200, "bpm": 60.0, "steadiness": "steady"}],
+     "display": "180*", "note": "Played in 6/8 time signature", "range": null}
   ],
   "detune": [
     {"cents": 23.4, "display": "+23.4 ¢", "fix": "pitch by −23.4 ¢ to fix"},

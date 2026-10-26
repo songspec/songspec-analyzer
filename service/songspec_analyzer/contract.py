@@ -70,9 +70,14 @@ class Detune(_M):
 
 
 class TempoSection(_M):
+    """One part of the song between beat switches (the usual song has exactly one)."""
     start: float
     end: float
-    bpm: float = Field(description="raw felt BPM of the section")
+    bpm: float = Field(description="felt BPM of the section (before the house rule)")
+    lo: Optional[float] = Field(None, description="p10 of the local tempo, felt BPM")
+    hi: Optional[float] = Field(None, description="p90 of the local tempo, felt BPM")
+    drift_pct: Optional[float] = Field(None, description="(hi - lo) / median, %")
+    steadiness: Literal["steady", "moderate", "live"] = Field("steady", description="tracker words: '128' / '~98' / '~97 - 100'")
 
 
 class TempoCurve(_M):
@@ -96,8 +101,9 @@ class Tempo(_M):
     compound: bool = False
     sections: List[TempoSection] = Field(default_factory=list)
     range: Optional[List[float]] = Field(None, description="[lo, hi] house-rule BPM when played live")
-    irregularity_pct: Optional[float] = None
-    feel: Optional[Literal["grid", "live"]] = None
+    irregularity_pct: Optional[float] = Field(None, description="std / mean of the beat intervals, %")
+    drift_pct: Optional[float] = Field(None, description="how far the smoothed tempo moves over the song (p95 - p5), %")
+    feel: Optional[Literal["grid", "live"]] = Field(None, description="'live' = played live / drifting, 'grid' = quantized")
     beats: List[float] = Field(default_factory=list)
     downbeats: List[float] = Field(default_factory=list)
     curve: TempoCurve = Field(default_factory=TempoCurve, description="per-beat tempo, at most 1500 points")

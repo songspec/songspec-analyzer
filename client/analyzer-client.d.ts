@@ -20,7 +20,7 @@ export interface Detune {
 export interface Tempo {
   bpm?: number | null; bpm_raw?: number | null; bpm_source: "audio" | "hooktheory"; alternates: number[];
   signature?: string | null; signature_conf?: number | null; compound: boolean;
-  sections: { start: number; end: number; bpm: number }[]; range?: [number, number] | null;
+  sections: TempoSection[]; range?: [number, number] | null; drift_pct?: number | null;
   irregularity_pct?: number | null; feel?: "grid" | "live" | null;
   beats: number[]; downbeats: number[]; curve: { t: number[]; bpm: number[] };
   display?: { bpm?: string | null; note?: string | null; alternates: string[] };
@@ -103,7 +103,10 @@ export declare function sectionsDisplay(sections: { start: number; end: number; 
   { key: string | null; note: string | null };
 export declare function houseBpm(raw: number, signature?: string): { bpm: number | null; compound: boolean };
 export declare function fmtBpm(bpm: number | null): string | null;
-export declare function bpmDisplay(raw: number, signature?: string, sections?: { bpm: number }[] | null, live?: boolean):
+export interface TempoSection { start: number; end: number; bpm: number; lo?: number; hi?: number; drift_pct?: number;
+  steadiness?: "steady" | "moderate" | "live" }
+export declare function sectionText(section: TempoSection, signature?: string): string;
+export declare function bpmDisplay(raw: number, signature?: string, sections?: TempoSection[] | null):
   { bpm: number | null; display: string | null; note: string | null; compound: boolean; range: [number, number] | null };
 export declare function detuneDisplay(cents: number, opts?: { totalCents?: number | null; tonic?: number | null; mode?: Mode | string | null }):
   { display: string; fix: string; a4_hz: number; semitones: number; total_text: string | null; key_text: string | null };

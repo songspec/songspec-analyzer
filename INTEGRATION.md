@@ -6,11 +6,12 @@ For SongSpec's main dev. This repo is a **self-contained analysis service plus a
 
 ## 1. Run it
 
-Local, no Docker (Python 3.10+):
+Local, no Docker (**Python 3.12**: the tempo engine uses BPM Fixer's tested pins):
 ```bash
-python -m venv .venv
-.venv/Scripts/pip install -e "service[ml]"       # Linux/macOS: .venv/bin/pip
-.venv/Scripts/python tools/fetch_models.py      # vendored model weights, SHA-256 checked (milestone 2+)
+python3.12 -m venv .venv
+.venv/Scripts/pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu   # or .../whl/cu130 for an NVIDIA GPU
+.venv/Scripts/pip install -r service/requirements.txt -e "service[dev]"                  # Linux/macOS: .venv/bin/pip
+.venv/Scripts/python tools/fetch_models.py      # vendored model weights, SHA-256 checked
 .venv/Scripts/python tools/dev_server.py        # API + demo on http://127.0.0.1:8765 (demo at /demo/, client tests at /client/test/)
 ```
 Production-style:
@@ -109,6 +110,9 @@ What the product brief asks the page to offer, as *suggestions* (your design dec
 | Chord summary, progressions, simplify, transpose | `chords.summary`, `chords.progressions[].display`, `segment.triad`, `transposeChord()` |
 | Preview-based warning (link input) | `warnings[]`, `track.source` ends in `-preview` |
 | "This is wrong" button | `POST …/feedback` |
+
+### Tempo fields in one paragraph
+`tempo.bpm` is the house-rule BPM (80–160, except compound meters 6/8, 9/8, 12/8, which keep the felt beat and set `compound: true`). `tempo.display.bpm` is the string to show: `"114"`, `"82.5"`, or `"~122 - 127"` when the song is played live. In that case `tempo.feel` is `"live"`, `tempo.range` is set, and `tempo.display.note` says `"BPM inconsistent - played live"`. A genuine **beat switch** (e.g. 100 → 140 BPM, confirmed by the bar length changing too) gives several `tempo.sections`, each with its own `bpm`. `tempo.beats` / `tempo.downbeats` are the cleaned grid (BPM Fixer's engine), good for a click track and for drawing bar lines. `tempo.curve` is per-beat tempo for a graph (BPM Fixer draws it blue, with the target green). `tempo.display.alternates` are ½× / 2× chips, plus the quarter-note BPM for compound meters ("what your DAW shows").
 
 The audio for playback stays in the user's browser (the `File` they dropped). The service never sends audio back.
 

@@ -31,3 +31,5 @@ service/models/*.onnx
 eval/local.toml
 eval/results/
 .claude/
+.venv311/
+*.log

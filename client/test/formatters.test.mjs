@@ -26,10 +26,10 @@ export async function runAll(loadJson) {
     const d = F.bpmDisplay(c.raw, c.sig);
     check(`house_bpm ${c.raw} ${c.sig}`, [d.bpm, d.display], [c.bpm, c.display]);
   }
-  for (const c of C.bpm_live) {
-    const secs = c.sections.map((b) => ({ bpm: b }));
-    const d = F.bpmDisplay(c.raw, c.sig, secs, secs.length > 0);
-    check(`bpm_live ${c.display}`, [d.display, d.note], [c.display, c.note]);
+  for (const c of C.bpm_sections) {
+    const d = F.bpmDisplay(c.raw, c.sig, c.sections);
+    const rng = d.range && d.range.map((x) => Math.round(x * 100) / 100);
+    check(`bpm_sections ${c.display}`, [d.display, d.note, rng], [c.display, c.note, c.range]);
   }
   for (const c of C.detune) {
     const d = F.detuneDisplay(c.cents, { totalCents: c.total_cents ?? null, tonic: c.tonic ? F.parsePitch(c.tonic) : null, mode: c.mode ?? null });

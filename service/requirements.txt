@@ -1,0 +1,13 @@
+# Exact versions for the analysis stack. Tempo uses BPM Fixer's own tested pins (BPM-Fixer-source/tools/requirements-windows.txt,
+# Python 3.12) so the port reproduces the app's numbers. torch comes from the PyTorch index (CPU or CUDA build), see docker/Dockerfile.
+numpy==2.5.4
+scipy==1.18.1
+librosa==1.0.0
+numba==0.68.0
+llvmlite==0.50.0
+soundfile==0.14.0
+soxr==1.1.0
+scikit-learn==1.9.1
+beat-this==1.1.0
+einops==0.8.2
+rotary-embedding-torch==0.9.1

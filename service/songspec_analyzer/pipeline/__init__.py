@@ -17,6 +17,10 @@ from ..config import Settings
 from ..store import Store
 
 
+class StageSkipped(Exception):
+    """A stage that has nothing to say about this audio (no steady beat, no tonal content). Its message becomes a warning."""
+
+
 @dataclass
 class Context:
     aid: str
@@ -122,6 +126,9 @@ def run_job(aid: str, store: Store, settings: Settings, stages=None):
             try:
                 part = s.run(ctx) or {}
                 store.merge_result(aid, part, stage=s.name, stage_state="done")
+            except StageSkipped as e:
+                store.set_stage(aid, s.name, "skipped")
+                ctx.warnings.append(str(e))
             except Exception as e:
                 if s.essential or isinstance(e, AudioError):
                     raise

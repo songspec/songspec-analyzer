@@ -45,12 +45,12 @@ def test_house_bpm(c):
     assert d["display"] == c["display"]
 
 
-@pytest.mark.parametrize("c", CASES["bpm_live"], ids=lambda c: c["display"])
-def test_bpm_live(c):
-    secs = [{"bpm": b} for b in c["sections"]]
-    d = bpm_display(c["raw"], c["sig"], secs, live=bool(secs))
+@pytest.mark.parametrize("c", CASES["bpm_sections"], ids=lambda c: c["display"])
+def test_bpm_sections(c):
+    d = bpm_display(c["raw"], c["sig"], c["sections"])
     assert d["display"] == c["display"]
     assert d["note"] == c["note"]
+    assert d["range"] == (pytest.approx(c["range"]) if c["range"] else None)
 
 
 @pytest.mark.parametrize("c", CASES["detune"], ids=lambda c: str(c["cents"]))
@@ -76,5 +76,5 @@ def test_tracker_row(c):
 
 
 def test_compound_flag():
-    assert house_bpm(62, "6/8") == (62, True)
+    assert house_bpm(62, "6/8") == (186, True)
     assert house_bpm(62, "4/4") == (124, False)

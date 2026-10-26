@@ -1,0 +1,17 @@
+{
+  "_comment": "Vendored model weights. tools/fetch_models.py fills this folder; a file is only used when its SHA-256 matches. Nothing is ever downloaded at request time.",
+  "beat_this-final0.ckpt": {
+    "sha256": "8c328b45f59d8dd3dff219253ff6a8d6482be57d0133a29140e2febbf8eb8331",
+    "bytes": 81058141,
+    "what": "Beat This! (CPJKU, ISMIR 2024) beat + downbeat tracker, checkpoint final0",
+    "local": [
+      "%PROGRAMFILES%/BPM Fixer/_internal/models/beat_this-final0.ckpt",
+      "%LOCALAPPDATA%/BPM Fixer/models/beat_this-final0.ckpt",
+      "~/.cache/torch/hub/checkpoints/beat_this-final0.ckpt"
+    ],
+    "urls": [
+      "https://cloud.cp.jku.at/public.php/dav/files/7ik4RrBKTS273gp/final0.ckpt",
+      "https://github.com/nashaad/beat_this/releases/download/checkpoints/final0.ckpt"
+    ]
+  }
+}
