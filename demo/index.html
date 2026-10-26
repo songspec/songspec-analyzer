@@ -26,6 +26,10 @@
   .tile { border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-height: 76px; }
   .tile b { display: block; font-size: 22px; } .tile small { color: var(--muted); display: block; }
   details pre { overflow: auto; max-height: 360px; font-size: 12px; }
+  .timeline svg { width: 100%; height: auto; display: block; margin: 8px 0; }
+  .timeline text { font: 10px system-ui, sans-serif; fill: var(--fg); }
+  .timeline .lane { fill: var(--muted); font-size: 9px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; } .chips span { border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
   .err { color: var(--bad); }
 </style>
 </head>
@@ -37,10 +41,15 @@
 <input id="file" type="file" accept="audio/*,video/*" multiple hidden>
 <form id="linkform"><input id="link" type="url" placeholder="…or paste a Spotify / Apple Music link"><button>Analyze link</button></form>
 <label class="muted"><input id="hiacc" type="checkbox"> high accuracy (stem separation, slower)</label>
+<details><summary class="muted">Fix BPM (BPM Fixer's engine on the server)</summary>
+  <form id="fixform"><input id="fixfile" type="file" accept="audio/*"> target BPM <input id="fixbpm" type="number" step="0.01" placeholder="auto">
+  <select id="fixfmt"><option>mp3</option><option>wav</option><option>flac</option></select> <button>Fix</button></form>
+  <div id="fixout" class="muted"></div>
+</details>
 <div id="jobs"></div>
 
 <script type="module">
-  import { createClient, trackerRowFor } from "/client/analyzer-client.js";
+  import { createClient, trackerRowFor, midi, chordpro, progressionText } from "/client/analyzer-client.js";
   const analyzer = createClient({ baseUrl: "" });
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -49,7 +58,9 @@
     const el = document.createElement("div");
     el.className = "job";
     el.innerHTML = `<div><b>${esc(title)}</b> <span class="muted status">queued</span></div><div class="stages"></div><div class="tiles"></div>
+      <div class="timeline"></div><div class="chips"></div>
       <div class="actions" hidden><button data-a="row">Copy as tracker row</button> <button data-a="json">Download JSON</button>
+      <button data-a="midi">MIDI (chords)</button> <button data-a="cho">ChordPro</button> <button data-a="prog">Copy progression</button>
       <button data-a="fb">This is wrong…</button></div><div class="err"></div><details><summary class="muted">raw JSON</summary><pre></pre></details>`;
     $("#jobs").prepend(el);
     return el;
@@ -67,6 +78,10 @@
     if (a.track?.duration) t.push(["Length", `${Math.floor(a.track.duration / 60)}:${String(Math.round(a.track.duration % 60)).padStart(2, "0")}`,
       [`${a.track.sample_rate} Hz · ${a.track.channels} ch`]]);
     $(".tiles", el).innerHTML = t.map(([h, v, subs]) => `<div class="tile"><small>${h}</small><b>${esc(v ?? "–")}</b>${subs.filter(Boolean).map((s) => `<small>${esc(s)}</small>`).join("")}</div>`).join("");
+    $(".timeline", el).innerHTML = timeline(a);
+    const ch = a.chords;
+    $(".chips", el).innerHTML = ch ? [...(ch.progressions || []).map((p) => `<span>${esc(p.display)} · ${esc(p.chords)}</span>`),
+      ...(ch.summary || []).slice(0, 8).map((x) => `<span>${esc(x.chord)} ${Math.round(x.seconds)} s</span>`)].join("") : "";
     $("pre", el).textContent = JSON.stringify(a, null, 2);
     $(".err", el).textContent = a.status === "error" ? a.error : "";
     if (a.status === "done") {
@@ -76,6 +91,12 @@
         const what = e.target.dataset.a;
         if (what === "row") { await navigator.clipboard.writeText(trackerRowFor(a)); e.target.textContent = "Copied"; }
         if (what === "json") location.href = analyzer.exportUrl(a.id, "json");
+        if (what === "midi" || what === "cho") {
+          const body = what === "midi" ? midi(a) : chordpro(a);
+          const url = URL.createObjectURL(new Blob([body], { type: what === "midi" ? "audio/midi" : "text/plain" }));
+          Object.assign(document.createElement("a"), { href: url, download: `${a.track?.title || "chords"}.${what === "midi" ? "mid" : "cho"}` }).click();
+        }
+        if (what === "prog") { await navigator.clipboard.writeText(progressionText(a)); e.target.textContent = "Copied"; }
         if (what === "fb") {
           const field = prompt("Which value is wrong? (key, bpm, detune, signature, chords, other)", "key");
           const correct = field && prompt(`Correct ${field}:`);
@@ -83,6 +104,49 @@
         }
       };
     }
+  }
+
+  // one SVG: beat grid, chords (with roman numerals), key sections, tempo curve, detune drift; all on the song's time axis
+  function timeline(a) {
+    const dur = a.track?.duration;
+    if (!dur) return "";
+    const W = 1000, x = (t) => (t / dur) * (W - 60) + 55, parts = [];
+    const lane = (y, name) => parts.push(`<text class="lane" x="0" y="${y + 10}">${name}</text>`);
+    const beats = a.tempo?.beats || [], downs = new Set((a.tempo?.downbeats || []).map((d) => d.toFixed(3)));
+    if (beats.length) {
+      lane(0, "beats");
+      for (const b of beats) parts.push(`<line x1="${x(b)}" x2="${x(b)}" y1="${downs.has(b.toFixed(3)) ? 0 : 8}" y2="16" stroke="var(--muted)" stroke-width="${downs.has(b.toFixed(3)) ? 1.2 : 0.4}"/>`);
+    }
+    const segs = a.chords?.segments || [];
+    if (segs.length) {
+      lane(22, "chords");
+      for (const s of segs) {
+        if (s.chord === "N") continue;
+        const root = "C Db D Eb E F Gb G Ab A Bb B".split(" ").indexOf(s.chord.match(/^[A-G]b?/)[0]);
+        const w = Math.max(1, x(s.end) - x(s.start));
+        parts.push(`<rect x="${x(s.start)}" y="22" width="${w}" height="26" fill="hsl(${root * 30} 55% 55% / .45)"/>`);
+        if (w > 26) parts.push(`<text x="${x(s.start) + 2}" y="33">${esc(s.chord)}</text><text x="${x(s.start) + 2}" y="45" class="lane">${esc(s.roman || "")}</text>`);
+      }
+    }
+    const ks = a.key?.sections?.length ? a.key.sections : (a.key?.display ? [{ start: 0, end: dur, display: a.key.display.key }] : []);
+    if (ks.length) {
+      lane(54, "key");
+      ks.forEach((s, i) => parts.push(`<rect x="${x(s.start)}" y="54" width="${x(s.end) - x(s.start)}" height="16" fill="hsl(${i * 90 + 200} 40% 50% / .3)"/><text x="${x(s.start) + 3}" y="66">${esc(s.display || s.key)}</text>`));
+    }
+    const c = a.tempo?.curve;
+    if (c?.t?.length > 2) {
+      lane(80, "tempo");
+      const lo = Math.min(...c.bpm), hi = Math.max(...c.bpm), y = (v) => 128 - ((v - lo) / Math.max(1e-6, hi - lo)) * 44;
+      parts.push(`<polyline fill="none" stroke="#1f5fbf" stroke-width="1" points="${c.t.map((t, i) => `${x(t)},${y(c.bpm[i])}`).join(" ")}"/>`);
+      parts.push(`<text class="lane" x="0" y="96">${hi.toFixed(0)}</text><text class="lane" x="0" y="128">${lo.toFixed(0)}</text>`);
+    }
+    const d = a.detune?.drift || [];
+    if (d.length > 1) {
+      lane(136, "detune");
+      const y = (v) => 150 - Math.max(-12, Math.min(12, v - a.detune.cents)) * 1.0;
+      parts.push(`<polyline fill="none" stroke="var(--accent)" points="${d.map((p) => `${x(p.t)},${y(p.cents)}`).join(" ")}"/>`);
+    }
+    return `<svg viewBox="0 0 ${W} 166" role="img" aria-label="timeline">${parts.join("")}</svg>`;
   }
 
   async function runFiles(files) {
@@ -99,6 +163,21 @@
   drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
   drop.ondragleave = () => drop.classList.remove("over");
   drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); e.dataTransfer.files.length && runFiles(e.dataTransfer.files); };
+  // ?id=<analysis id>: show an existing analysis (handy for checking results)
+  const qid = new URLSearchParams(location.search).get("id");
+  if (qid) { const el = card(qid); analyzer.watch(qid, { onUpdate: (a) => render(el, a) }).catch((err) => ($(".err", el).textContent = err.message)); }
+  $("#fixform").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = $("#fixfile").files[0];
+    if (!f) return;
+    const out = $("#fixout");
+    try {
+      const v = await analyzer.fixBpm(f, { options: { target_bpm: parseFloat($("#fixbpm").value) || undefined, format: $("#fixfmt").value },
+        onUpdate: (j) => (out.textContent = `${j.status} ${j.progress?.message || ""}`) });
+      out.innerHTML = `done: <a href="${v.downloadUrl}">${esc(v.fix.file_name)}</a> · ${v.fix.target_bpm} BPM · ` +
+        (v.fix.verify ? `${v.fix.verify.on_grid_pct} % of clear hits on the grid` : "no verification");
+    } catch (err) { out.textContent = `${err.code}: ${err.message}`; }
+  };
   $("#linkform").onsubmit = async (e) => {
     e.preventDefault();
     const url = $("#link").value.trim();
