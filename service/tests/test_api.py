@@ -57,6 +57,15 @@ def test_same_file_is_cached(client, song):
     assert r["track"]["duration"] == a["track"]["duration"]
 
 
+def test_engine_version_change_invalidates_the_cache(client, song, monkeypatch):
+    """A cached result from an older engine must never be served after an upgrade."""
+    import songspec_analyzer.store as store_mod
+    wait_done(client, upload(client, song).json()["id"])
+    monkeypatch.setattr(store_mod, "ENGINE_VERSION", "999.0.0")
+    r = upload(client, song).json()
+    assert r["cached"] is False
+
+
 def test_rejects_garbage_and_short_files(client, tmp_path):
     bad = tmp_path / "x.mp3"
     bad.write_bytes(b"this is not audio" * 100)
