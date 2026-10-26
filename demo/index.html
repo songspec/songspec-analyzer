@@ -3,189 +3,435 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Analyzer Reference Demo</title>
+<title>Analyzer Test Bench</title>
 <style>
-  /* Reference harness only. SongSpec's real UI is built by the site's main dev; nothing here is meant to be copied as design. */
-  :root { --bg: #fafafa; --fg: #161616; --muted: #666; --line: #ddd; --card: #fff; --accent: #1f5fbf; --ok: #2a9d3f; --bad: #c62828; }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) { --bg: #121212; --fg: #eee; --muted: #9a9a9a; --line: #333; --card: #1b1b1b; --accent: #6ea1ff; --ok: #4cc06a; --bad: #ef5350; }
+  /* Local test bench for SongSpec Analyzer. Not the SongSpec UI: the site's main dev owns that. */
+  :root {
+    --bg: #f6f6f4; --card: #ffffff; --fg: #18181b; --muted: #6b6b73; --line: #e2e2de; --accent: #2457d6; --accent-soft: #e6edfd;
+    --ok: #1f8a4c; --warn: #b26b00; --bad: #c62828; --curve: #1f5fbf; --target: #2a9d3f; --play: #e0452b;
   }
-  :root[data-theme="dark"] { --bg: #121212; --fg: #eee; --muted: #9a9a9a; --line: #333; --card: #1b1b1b; --accent: #6ea1ff; --ok: #4cc06a; --bad: #ef5350; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111214; --card: #1a1b1e; --fg: #ececee; --muted: #9a9aa3; --line: #2c2d31; --accent: #7aa2ff; --accent-soft: #1d2740;
+      --ok: #4cc77a; --warn: #f0a63a; --bad: #ef5350; --curve: #6ea1ff; --target: #5fd07a; --play: #ff7a5c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111214; --card: #1a1b1e; --fg: #ececee; --muted: #9a9aa3; --line: #2c2d31; --accent: #7aa2ff; --accent-soft: #1d2740;
+    --ok: #4cc77a; --warn: #f0a63a; --bad: #ef5350; --curve: #6ea1ff; --target: #5fd07a; --play: #ff7a5c;
+  }
   * { box-sizing: border-box; }
-  body { background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; margin: 0; padding: 16px; max-width: 980px; margin-inline: auto; }
-  h1 { font-size: 20px; margin: 0 0 4px; } .muted { color: var(--muted); font-size: 13px; }
-  #drop { border: 2px dashed var(--line); border-radius: 10px; padding: 28px 16px; text-align: center; cursor: pointer; margin: 14px 0; }
-  #drop.over { border-color: var(--accent); }
-  form { display: flex; gap: 8px; flex-wrap: wrap; } input[type=url] { flex: 1 1 240px; padding: 8px; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; }
-  button { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
-  .job { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin: 14px 0; }
-  .stages { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; } .stage { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); }
-  .stage.done { border-color: var(--ok); color: var(--ok); } .stage.running { border-color: var(--accent); color: var(--accent); } .stage.error { border-color: var(--bad); color: var(--bad); }
-  .stage.unavailable { opacity: .5; }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 10px 0; }
-  .tile { border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-height: 76px; }
-  .tile b { display: block; font-size: 22px; } .tile small { color: var(--muted); display: block; }
-  details pre { overflow: auto; max-height: 360px; font-size: 12px; }
-  .timeline svg { width: 100%; height: auto; display: block; margin: 8px 0; }
-  .timeline text { font: 10px system-ui, sans-serif; fill: var(--fg); }
-  .timeline .lane { fill: var(--muted); font-size: 9px; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; } .chips span { border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
-  .err { color: var(--bad); }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 20px 16px 60px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
+  .muted { color: var(--muted); font-size: 13px; }
+  button, input, select { font: inherit; color: var(--fg); }
+  button { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+  input[type=url], input[type=number], select { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+  #drop { border: 2px dashed var(--line); border-radius: 14px; padding: 34px 16px; text-align: center; cursor: pointer; background: var(--card);
+          transition: border-color .15s, background .15s; }
+  #drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  #drop b { font-size: 17px; display: block; margin-bottom: 4px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+  .row input[type=url] { flex: 1 1 260px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-top: 16px; }
+  .card h2 { font-size: 16px; margin: 0; overflow-wrap: anywhere; }
+  .status { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .bar { height: 4px; background: var(--line); border-radius: 4px; overflow: hidden; margin: 10px 0 4px; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-top: 12px; }
+  .tile { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-height: 92px; }
+  .tile .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .tile .value { font-size: 26px; font-weight: 650; margin: 2px 0; line-height: 1.15; }
+  .tile .sub { font-size: 13px; color: var(--muted); }
+  .tile .pending { color: var(--muted); font-size: 14px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .chip { font-size: 12px; border: 1px solid var(--line); border-radius: 99px; padding: 1px 8px; color: var(--muted); }
+  .chip.on { border-color: var(--accent); color: var(--accent); }
+  details.why { margin-top: 6px; font-size: 12px; color: var(--muted); }
+  details.why summary { cursor: pointer; }
+  .player { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+  .now { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+  .now .chord { font-size: 34px; font-weight: 700; min-width: 90px; }
+  .now .roman { font-size: 18px; color: var(--muted); }
+  .now .time { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .timeline { position: relative; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+  .timeline svg { display: block; cursor: pointer; }
+  .timeline text { font: 11px system-ui, sans-serif; fill: var(--fg); pointer-events: none; }
+  .timeline .lane { fill: var(--muted); font-size: 10px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .err { color: var(--bad); margin-top: 8px; }
+  .warn { color: var(--warn); font-size: 13px; margin-top: 8px; }
+  details.raw pre { max-height: 360px; overflow: auto; font-size: 12px; background: var(--bg); padding: 10px; border-radius: 8px; }
+  .tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .small { font-size: 13px; }
+  a { color: var(--accent); }
+  @media (max-width: 520px) { .tile .value { font-size: 22px; } .now .chord { font-size: 28px; } }
 </style>
 </head>
 <body>
-<h1>SongSpec Analyzer: reference demo</h1>
-<div class="muted">A test harness for the API and <code>client/analyzer-client.js</code>. It is not the SongSpec UI.</div>
+<main>
+  <header>
+    <h1>Analyzer test bench</h1>
+    <span class="muted">local testing page for SongSpec Analyzer · not the SongSpec UI</span>
+  </header>
 
-<div id="drop" tabindex="0">Drop songs here, or click to choose (several are queued one after another)</div>
-<input id="file" type="file" accept="audio/*,video/*" multiple hidden>
-<form id="linkform"><input id="link" type="url" placeholder="…or paste a Spotify / Apple Music link"><button>Analyze link</button></form>
-<label class="muted"><input id="hiacc" type="checkbox"> high accuracy (stem separation, slower)</label>
-<details><summary class="muted">Fix BPM (BPM Fixer's engine on the server)</summary>
-  <form id="fixform"><input id="fixfile" type="file" accept="audio/*"> target BPM <input id="fixbpm" type="number" step="0.01" placeholder="auto">
-  <select id="fixfmt"><option>mp3</option><option>wav</option><option>flac</option></select> <button>Fix</button></form>
-  <div id="fixout" class="muted"></div>
-</details>
-<div id="jobs"></div>
+  <div id="drop" tabindex="0" role="button" aria-label="Choose audio files">
+    <b>Drop songs here</b>
+    <span class="muted">or click to choose · several files are analysed one after another · the audio stays in your browser for playback</span>
+  </div>
+  <input id="file" type="file" accept="audio/*,video/*" multiple hidden>
+  <form class="row" id="linkform">
+    <input id="link" type="url" placeholder="…or paste a Spotify / Apple Music song link">
+    <button>Look up link</button>
+    <label class="muted"><input id="hiacc" type="checkbox"> high accuracy</label>
+  </form>
+
+  <div id="jobs"></div>
+
+  <div class="tools">
+    <section class="card">
+      <h2>Mashup helper</h2>
+      <p class="muted small">Pick two analysed songs: how to make B sit on A.</p>
+      <div class="row"><select id="ma"></select><select id="mb"></select><button id="mgo">Compare</button></div>
+      <div id="mout" class="small" style="margin-top:8px"></div>
+    </section>
+    <section class="card">
+      <h2>Fix BPM</h2>
+      <p class="muted small">BPM Fixer's engine on the server: one constant tempo, downloadable file.</p>
+      <form class="row" id="fixform">
+        <input id="fixfile" type="file" accept="audio/*" class="small">
+        <input id="fixbpm" type="number" step="0.01" placeholder="target BPM (auto)" style="width:150px">
+        <select id="fixfmt"><option>mp3</option><option>wav</option><option>flac</option></select>
+        <button class="primary">Fix</button>
+      </form>
+      <div id="fixout" class="small" style="margin-top:8px"></div>
+    </section>
+  </div>
+</main>
 
 <script type="module">
-  import { createClient, trackerRowFor, midi, chordpro, progressionText } from "/client/analyzer-client.js";
-  const analyzer = createClient({ baseUrl: "" });
-  const $ = (s, el = document) => el.querySelector(s);
-  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+import { createClient, trackerRowFor, midi, chordpro, progressionText, transformChord } from "/client/analyzer-client.js";
 
-  function card(title) {
-    const el = document.createElement("div");
-    el.className = "job";
-    el.innerHTML = `<div><b>${esc(title)}</b> <span class="muted status">queued</span></div><div class="stages"></div><div class="tiles"></div>
-      <div class="timeline"></div><div class="chips"></div>
-      <div class="actions" hidden><button data-a="row">Copy as tracker row</button> <button data-a="json">Download JSON</button>
-      <button data-a="midi">MIDI (chords)</button> <button data-a="cho">ChordPro</button> <button data-a="prog">Copy progression</button>
-      <button data-a="fb">This is wrong…</button></div><div class="err"></div><details><summary class="muted">raw JSON</summary><pre></pre></details>`;
-    $("#jobs").prepend(el);
-    return el;
+const api = createClient({ baseUrl: "" });
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmtT = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+const STAGES = ["decode", "detune", "key_quick", "tempo", "detune_drift", "chords", "key"];
+const done = new Map();          // id -> analysis, for the mashup helper
+let audioCtx = null;
+const ctx = () => (audioCtx ||= new (window.AudioContext || window.webkitAudioContext)());
+
+// ------------------------------------------------------------------------------------------------ job card
+function card(title) {
+  const el = document.createElement("section");
+  el.className = "card";
+  el.innerHTML = `
+    <h2>${esc(title)}</h2><div class="status">queued</div><div class="bar"><i></i></div>
+    <div class="tiles">
+      <div class="tile" data-t="key"><div class="label">Key</div><div class="pending">…</div></div>
+      <div class="tile" data-t="bpm"><div class="label">BPM</div><div class="pending">…</div></div>
+      <div class="tile" data-t="detune"><div class="label">Detune</div><div class="pending">…</div></div>
+      <div class="tile" data-t="sig"><div class="label">Time signature</div><div class="pending">…</div></div>
+    </div>
+    <div class="warn"></div><div class="err"></div>
+    <div class="player" hidden>
+      <div class="now"><span class="chord">–</span><span class="roman"></span><span class="time">0:00</span></div>
+      <div class="timeline"></div>
+      <div class="controls">
+        <button data-p="play" class="primary">▶ Play</button>
+        <button data-p="click" aria-pressed="false">Click track</button>
+        <button data-p="retune" aria-pressed="false">Hear at A440</button>
+        <label class="muted small">transpose chords <select data-p="tr">${[-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6].map((n) => `<option value="${n}" ${n === 0 ? "selected" : ""}>${n > 0 ? "+" + n : n}</option>`).join("")}</select></label>
+        <label class="muted small"><input type="checkbox" data-p="simple"> triads only</label>
+      </div>
+    </div>
+    <div class="actions" hidden>
+      <button data-a="row">Copy tracker row</button><button data-a="prog">Copy progression</button>
+      <button data-a="midi">MIDI</button><button data-a="cho">ChordPro</button><button data-a="json">JSON</button>
+      <button data-a="fb">This is wrong…</button>
+    </div>
+    <details class="raw"><summary class="muted small">raw JSON</summary><pre></pre></details>`;
+  $("#jobs").prepend(el);
+  return el;
+}
+
+function tile(el, which, value, subs = [], extra = "") {
+  const t = $(`[data-t="${which}"]`, el);
+  t.innerHTML = `<div class="label">${t.querySelector(".label").textContent}</div><div class="value">${esc(value ?? "–")}</div>` +
+    subs.filter(Boolean).map((s) => `<div class="sub">${esc(s)}</div>`).join("") + extra;
+}
+
+function render(el, a, st) {
+  const stages = a.stages || {};
+  const n = STAGES.filter((s) => ["done", "skipped", "error", "unavailable"].includes(stages[s])).length;
+  $(".bar i", el).style.width = `${a.status === "done" || a.status === "error" ? 100 : Math.round((n / STAGES.length) * 100)}%`;
+  $(".status", el).textContent = a.status === "running" || a.status === "queued" ? (a.progress?.message || a.status)
+    : a.status + (a.cached ? " (cached)" : "") + (a.timing ? ` · ${a.timing.seconds} s` : "");
+  if (a.key?.display) {
+    const k = a.key;
+    const votes = Object.entries(k.estimators || {}).map(([n, e]) => `${n}: ${e.key ?? "?"}${e.p != null ? ` (${Math.round(e.p * 100)} %)` : ""}`);
+    tile(el, "key", k.display.key, [k.display.note, `${k.camelot} · ${k.open_key}${k.confidence != null ? ` · ${Math.round(k.confidence * 100)} %` : ""}`,
+      k.display.ambiguity_text, k.preliminary ? "quick estimate, refining…" : null],
+      `<div class="chips">${(k.candidates || []).map((c, i) => `<span class="chip ${i === 0 ? "on" : ""}">${esc(c.key)} ${Math.round(c.p * 100)} %</span>`).join("")}</div>` +
+      `<details class="why"><summary>what voted</summary>${votes.map(esc).join("<br>")}</details>`);
   }
-
-  function render(el, a) {
-    $(".status", el).textContent = a.status + (a.cached ? " (cached)" : "") + (a.progress ? ` · ${a.progress.message}` : "");
-    $(".stages", el).innerHTML = Object.entries(a.stages || {}).map(([k, v]) => `<span class="stage ${v}">${k}: ${v}</span>`).join("");
-    const t = [];
-    if (a.key?.display) t.push(["Key", a.key.display.key, [a.key.display.note, a.key.camelot && `${a.key.camelot} · ${a.key.open_key}`,
-      a.key.confidence != null && `${Math.round(a.key.confidence * 100)} %`, a.key.display.ambiguity_text]]);
-    if (a.tempo?.display) t.push(["BPM", a.tempo.display.bpm, [a.tempo.display.note, a.tempo.display.alternates?.join(" · ")]]);
-    if (a.detune?.display) t.push(["Detune", a.detune.display.display, [a.detune.display.fix, a.detune.display.key_text]]);
-    if (a.tempo?.signature) t.push(["Time signature", a.tempo.signature, [a.tempo.signature_conf != null && `${Math.round(a.tempo.signature_conf * 100)} %`]]);
-    if (a.track?.duration) t.push(["Length", `${Math.floor(a.track.duration / 60)}:${String(Math.round(a.track.duration % 60)).padStart(2, "0")}`,
-      [`${a.track.sample_rate} Hz · ${a.track.channels} ch`]]);
-    $(".tiles", el).innerHTML = t.map(([h, v, subs]) => `<div class="tile"><small>${h}</small><b>${esc(v ?? "–")}</b>${subs.filter(Boolean).map((s) => `<small>${esc(s)}</small>`).join("")}</div>`).join("");
-    $(".timeline", el).innerHTML = timeline(a);
-    const ch = a.chords;
-    $(".chips", el).innerHTML = ch ? [...(ch.progressions || []).map((p) => `<span>${esc(p.display)} · ${esc(p.chords)}</span>`),
-      ...(ch.summary || []).slice(0, 8).map((x) => `<span>${esc(x.chord)} ${Math.round(x.seconds)} s</span>`)].join("") : "";
-    $("pre", el).textContent = JSON.stringify(a, null, 2);
-    $(".err", el).textContent = a.status === "error" ? a.error : "";
-    if (a.status === "done") {
-      const acts = $(".actions", el);
-      acts.hidden = false;
-      acts.onclick = async (e) => {
-        const what = e.target.dataset.a;
-        if (what === "row") { await navigator.clipboard.writeText(trackerRowFor(a)); e.target.textContent = "Copied"; }
-        if (what === "json") location.href = analyzer.exportUrl(a.id, "json");
-        if (what === "midi" || what === "cho") {
-          const body = what === "midi" ? midi(a) : chordpro(a);
-          const url = URL.createObjectURL(new Blob([body], { type: what === "midi" ? "audio/midi" : "text/plain" }));
-          Object.assign(document.createElement("a"), { href: url, download: `${a.track?.title || "chords"}.${what === "midi" ? "mid" : "cho"}` }).click();
-        }
-        if (what === "prog") { await navigator.clipboard.writeText(progressionText(a)); e.target.textContent = "Copied"; }
-        if (what === "fb") {
-          const field = prompt("Which value is wrong? (key, bpm, detune, signature, chords, other)", "key");
-          const correct = field && prompt(`Correct ${field}:`);
-          if (correct) { await analyzer.feedback(a.id, field, correct); e.target.textContent = "Thanks"; }
-        }
-      };
-    }
+  if (a.tempo?.display) {
+    const t = a.tempo;
+    tile(el, "bpm", t.display.bpm, [t.display.note, t.feel === "live" ? "played live / drifting" : null],
+      `<div class="chips">${(t.display.alternates || []).map((x) => `<span class="chip">${esc(x)}</span>`).join("")}</div>`);
   }
-
-  // one SVG: beat grid, chords (with roman numerals), key sections, tempo curve, detune drift; all on the song's time axis
-  function timeline(a) {
-    const dur = a.track?.duration;
-    if (!dur) return "";
-    const W = 1000, x = (t) => (t / dur) * (W - 60) + 55, parts = [];
-    const lane = (y, name) => parts.push(`<text class="lane" x="0" y="${y + 10}">${name}</text>`);
-    const beats = a.tempo?.beats || [], downs = new Set((a.tempo?.downbeats || []).map((d) => d.toFixed(3)));
-    if (beats.length) {
-      lane(0, "beats");
-      for (const b of beats) parts.push(`<line x1="${x(b)}" x2="${x(b)}" y1="${downs.has(b.toFixed(3)) ? 0 : 8}" y2="16" stroke="var(--muted)" stroke-width="${downs.has(b.toFixed(3)) ? 1.2 : 0.4}"/>`);
-    }
-    const segs = a.chords?.segments || [];
-    if (segs.length) {
-      lane(22, "chords");
-      for (const s of segs) {
-        if (s.chord === "N") continue;
-        const root = "C Db D Eb E F Gb G Ab A Bb B".split(" ").indexOf(s.chord.match(/^[A-G]b?/)[0]);
-        const w = Math.max(1, x(s.end) - x(s.start));
-        parts.push(`<rect x="${x(s.start)}" y="22" width="${w}" height="26" fill="hsl(${root * 30} 55% 55% / .45)"/>`);
-        if (w > 26) parts.push(`<text x="${x(s.start) + 2}" y="33">${esc(s.chord)}</text><text x="${x(s.start) + 2}" y="45" class="lane">${esc(s.roman || "")}</text>`);
-      }
-    }
-    const ks = a.key?.sections?.length ? a.key.sections : (a.key?.display ? [{ start: 0, end: dur, display: a.key.display.key }] : []);
-    if (ks.length) {
-      lane(54, "key");
-      ks.forEach((s, i) => parts.push(`<rect x="${x(s.start)}" y="54" width="${x(s.end) - x(s.start)}" height="16" fill="hsl(${i * 90 + 200} 40% 50% / .3)"/><text x="${x(s.start) + 3}" y="66">${esc(s.display || s.key)}</text>`));
-    }
-    const c = a.tempo?.curve;
-    if (c?.t?.length > 2) {
-      lane(80, "tempo");
-      const lo = Math.min(...c.bpm), hi = Math.max(...c.bpm), y = (v) => 128 - ((v - lo) / Math.max(1e-6, hi - lo)) * 44;
-      parts.push(`<polyline fill="none" stroke="#1f5fbf" stroke-width="1" points="${c.t.map((t, i) => `${x(t)},${y(c.bpm[i])}`).join(" ")}"/>`);
-      parts.push(`<text class="lane" x="0" y="96">${hi.toFixed(0)}</text><text class="lane" x="0" y="128">${lo.toFixed(0)}</text>`);
-    }
-    const d = a.detune?.drift || [];
-    if (d.length > 1) {
-      lane(136, "detune");
-      const y = (v) => 150 - Math.max(-12, Math.min(12, v - a.detune.cents)) * 1.0;
-      parts.push(`<polyline fill="none" stroke="var(--accent)" points="${d.map((p) => `${x(p.t)},${y(p.cents)}`).join(" ")}"/>`);
-    }
-    return `<svg viewBox="0 0 ${W} 166" role="img" aria-label="timeline">${parts.join("")}</svg>`;
+  if (a.detune?.display) {
+    const d = a.detune;
+    const arrow = d.cents > 0.05 ? "↑ sharp" : d.cents < -0.05 ? "↓ flat" : "on pitch";
+    tile(el, "detune", d.display.display, [`${arrow} · A4 = ${d.a4_hz} Hz`, d.display.fix, d.drift_flag ? `tuning moves ${d.drift_range_cents ?? ""} ¢ over the song` : null],
+      `<details class="why"><summary>estimators</summary>${Object.entries(d.estimators || {}).map(([n, v]) => `${esc(n)}: ${v == null ? "–" : v + " ¢"}`).join("<br>")}</details>`);
   }
-
-  async function runFiles(files) {
-    const cards = [...files].map((f) => card(f.name));
-    const options = { high_accuracy: $("#hiacc").checked };
-    await analyzer.analyzeQueue([...files], { options, onFileUpdate: (i, a) => render(cards[i], a) })
-      .then((res) => res.forEach((r, i) => r.status === "error" && !r.id && ($(".err", cards[i]).textContent = r.error)));
+  if (a.tempo?.signature) tile(el, "sig", a.tempo.signature, [a.tempo.signature_conf != null ? `${Math.round(a.tempo.signature_conf * 100)} % of bars agree` : null]);
+  for (const [s, which] of [["detune", "detune"], ["tempo", "bpm"], ["key_quick", "key"]]) {
+    if (stages[s] === "skipped" && !$(`[data-t="${which}"] .value`, el)) tile(el, which, "–", ["not measurable on this file"]);
   }
+  if (stages.tempo === "skipped" && !$('[data-t="sig"] .value', el)) tile(el, "sig", "–", ["no steady beat"]);
+  $(".warn", el).textContent = (a.warnings || []).join(" · ");
+  $(".err", el).textContent = a.status === "error" ? a.error : "";
+  $("pre", el).textContent = JSON.stringify(a, null, 2);
+  if (a.status === "done") {
+    done.set(a.id, a);
+    refreshMashup();
+    $(".actions", el).hidden = false;
+    wireActions(el, a);
+    if (a.track?.duration) setupPlayer(el, a, st);
+  }
+}
 
-  const drop = $("#drop"), input = $("#file");
-  drop.onclick = () => input.click();
-  drop.onkeydown = (e) => (e.key === "Enter" || e.key === " ") && input.click();
-  input.onchange = () => input.files.length && runFiles(input.files);
-  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
-  drop.ondragleave = () => drop.classList.remove("over");
-  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); e.dataTransfer.files.length && runFiles(e.dataTransfer.files); };
-  // ?id=<analysis id>: show an existing analysis (handy for checking results)
-  const qid = new URLSearchParams(location.search).get("id");
-  if (qid) { const el = card(qid); analyzer.watch(qid, { onUpdate: (a) => render(el, a) }).catch((err) => ($(".err", el).textContent = err.message)); }
-  $("#fixform").onsubmit = async (e) => {
-    e.preventDefault();
-    const f = $("#fixfile").files[0];
-    if (!f) return;
-    const out = $("#fixout");
-    try {
-      const v = await analyzer.fixBpm(f, { options: { target_bpm: parseFloat($("#fixbpm").value) || undefined, format: $("#fixfmt").value },
-        onUpdate: (j) => (out.textContent = `${j.status} ${j.progress?.message || ""}`) });
-      out.innerHTML = `done: <a href="${v.downloadUrl}">${esc(v.fix.file_name)}</a> · ${v.fix.target_bpm} BPM · ` +
-        (v.fix.verify ? `${v.fix.verify.on_grid_pct} % of clear hits on the grid` : "no verification");
-    } catch (err) { out.textContent = `${err.code}: ${err.message}`; }
+function wireActions(el, a) {
+  $(".actions", el).onclick = async (e) => {
+    const w = e.target.dataset.a;
+    if (!w) return;
+    const flash = (t) => { const o = e.target.textContent; e.target.textContent = t; setTimeout(() => (e.target.textContent = o), 1200); };
+    if (w === "row") { await navigator.clipboard.writeText(trackerRowFor(a)); flash("Copied"); }
+    if (w === "prog") { await navigator.clipboard.writeText(progressionText(a)); flash("Copied"); }
+    if (w === "json") location.href = api.exportUrl(a.id, "json");
+    if (w === "midi" || w === "cho") {
+      const body = w === "midi" ? midi(a) : chordpro(a);
+      const url = URL.createObjectURL(new Blob([body], { type: w === "midi" ? "audio/midi" : "text/plain" }));
+      Object.assign(document.createElement("a"), { href: url, download: `${a.track?.title || "chords"}.${w === "midi" ? "mid" : "cho"}` }).click();
+    }
+    if (w === "fb") {
+      const field = prompt("Which value is wrong? (key, bpm, detune, signature, chords, other)", "key");
+      const correct = field && prompt(`Correct ${field}:`);
+      if (correct) { await api.feedback(a.id, field, correct); flash("Thanks"); }
+    }
   };
-  $("#linkform").onsubmit = async (e) => {
-    e.preventDefault();
-    const url = $("#link").value.trim();
-    if (!url) return;
-    const el = card(url);
-    try { await analyzer.analyzeLink(url, { options: { high_accuracy: $("#hiacc").checked }, onUpdate: (a) => render(el, a) }); }
-    catch (err) { $(".err", el).textContent = `${err.code}: ${err.message}`; $(".status", el).textContent = "error"; }
+}
+
+// ------------------------------------------------------------------------------------------------ timeline
+const ROOTS = "C Db D Eb E F Gb G Ab A Bb B".split(" ");
+function timelineSVG(a, opts) {
+  const dur = a.track.duration, pxs = Math.max(6, Math.min(24, 1600 / dur)), W = Math.max(900, Math.round(dur * pxs) + 60), H = 182;
+  const x = (t) => 50 + t * pxs, p = [];
+  const lane = (y, s) => p.push(`<text class="lane" x="4" y="${y + 11}">${s}</text>`);
+  const beats = a.tempo?.beats || [], downs = new Set((a.tempo?.downbeats || []).map((d) => d.toFixed(3)));
+  if (beats.length) { lane(0, "beats"); for (const b of beats) { const d = downs.has(b.toFixed(3)); p.push(`<line x1="${x(b)}" x2="${x(b)}" y1="${d ? 2 : 9}" y2="16" stroke="var(--muted)" stroke-width="${d ? 1.2 : .5}"/>`); } }
+  const segs = a.chords?.segments || [];
+  if (segs.length) {
+    lane(24, "chords");
+    for (const s of segs) {
+      if (s.chord === "N") continue;
+      const name = transformChord(s.chord, opts.tr, opts.simple);
+      const r = ROOTS.indexOf(name.match(/^[A-G]b?/)[0]);
+      const w = Math.max(1, x(s.end) - x(s.start));
+      p.push(`<rect x="${x(s.start)}" y="22" width="${Math.max(1, w - 1)}" height="30" rx="3" fill="hsl(${r * 30} 60% 55% / .35)"/>`);
+      if (w > 24) p.push(`<text x="${x(s.start) + 3}" y="35">${esc(name)}</text><text x="${x(s.start) + 3}" y="48" class="lane">${esc(opts.tr ? "" : s.roman || "")}</text>`);
+    }
+  }
+  const ks = a.key?.sections?.length ? a.key.sections : (a.key?.display ? [{ start: 0, end: dur, display: a.key.display.key }] : []);
+  if (ks.length) { lane(58, "key"); ks.forEach((s, i) => p.push(`<rect x="${x(s.start)}" y="58" width="${x(s.end) - x(s.start)}" height="18" rx="3" fill="hsl(${210 + i * 70} 50% 50% / .25)"/><text x="${x(s.start) + 4}" y="71">${esc(s.display || s.key)}</text>`)); }
+  const c = a.tempo?.curve;
+  if (c?.t?.length > 2) {
+    lane(84, "tempo");
+    const vals = [...c.bpm].sort((m, n) => m - n), lo = vals[Math.floor(vals.length * .02)], hi = vals[Math.floor(vals.length * .98)];
+    const y = (v) => 136 - ((Math.min(hi, Math.max(lo, v)) - lo) / Math.max(1e-6, hi - lo)) * 46;
+    const target = a.tempo.bpm_raw;
+    if (target) p.push(`<line x1="${x(0)}" x2="${x(dur)}" y1="${y(target)}" y2="${y(target)}" stroke="var(--target)" stroke-width="1.5"/>`);
+    p.push(`<polyline fill="none" stroke="var(--curve)" stroke-width="1" points="${c.t.map((t, i) => `${x(t).toFixed(1)},${y(c.bpm[i]).toFixed(1)}`).join(" ")}"/>`);
+    p.push(`<text class="lane" x="4" y="110">${hi.toFixed(0)}</text><text class="lane" x="4" y="136">${lo.toFixed(0)}</text>`);
+  }
+  const d = a.detune?.drift || [];
+  if (d.length > 1) {
+    lane(146, "detune");
+    const y = (v) => 164 - Math.max(-14, Math.min(14, v - a.detune.cents));
+    p.push(`<line x1="${x(0)}" x2="${x(dur)}" y1="164" y2="164" stroke="var(--line)"/>`);
+    p.push(`<polyline fill="none" stroke="var(--accent)" stroke-width="1.5" points="${d.map((q) => `${x(q.t)},${y(q.cents)}`).join(" ")}"/>`);
+  }
+  for (let t = 0; t <= dur; t += 30) p.push(`<text class="lane" x="${x(t) - 8}" y="${H - 2}">${fmtT(t)}</text>`);
+  p.push(`<line class="head" x1="50" x2="50" y1="0" y2="${H - 12}" stroke="var(--play)" stroke-width="2"/>`);
+  return { svg: `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="timeline">${p.join("")}</svg>`, x, pxs };
+}
+
+// ------------------------------------------------------------------------------------------------ player (WebAudio)
+function setupPlayer(el, a, st) {
+  if (st.player) return;                       // render() is called on every update; set the player up once
+  st.player = true;
+  $(".player", el).hidden = false;
+  const opts = { tr: 0, simple: false };
+  const segs = a.chords?.segments || [];
+  const beats = a.tempo?.beats || [];
+  const S = { buf: null, src: null, started: 0, offset: 0, playing: false, click: false, retune: false, raf: 0, clickNodes: [] };
+  let tl = null;
+  const rate = () => (S.retune && a.detune ? Math.pow(2, -a.detune.cents / 1200) : 1);
+  const pos = () => (S.playing ? S.offset + (ctx().currentTime - S.started) * rate() : S.offset);
+  const moveHead = (t) => {
+    const h = $(".head", el);
+    if (!h || !tl) return;
+    h.setAttribute("x1", tl.x(t)); h.setAttribute("x2", tl.x(t));
+    $(".time", el).textContent = `${fmtT(Math.max(0, t))} / ${fmtT(a.track.duration)}`;
+    const s = segs.find((g) => g.start <= t && t < g.end);
+    $(".chord", el).textContent = s && s.chord !== "N" ? transformChord(s.chord, opts.tr, opts.simple) : "–";
+    $(".roman", el).textContent = s && !opts.tr ? s.roman || "" : "";
+    const box = $(".timeline", el), px = tl.x(t);
+    if (S.playing && (px < box.scrollLeft + 40 || px > box.scrollLeft + box.clientWidth - 40)) box.scrollLeft = px - 80;
   };
+  const draw = () => {
+    tl = timelineSVG(a, opts);
+    $(".timeline", el).innerHTML = tl.svg;
+    $(".timeline svg", el).onclick = (e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      seek(Math.max(0, (e.clientX - r.left - 50) / tl.pxs));
+    };
+    moveHead(pos());
+  };
+  const tick = () => {
+    const t = pos();
+    moveHead(t);
+    if (S.playing && t >= a.track.duration) stop(true); else if (S.playing) S.raf = requestAnimationFrame(tick);
+  };
+  const scheduleClicks = (from) => {
+    S.clickNodes.forEach((n) => { try { n.stop(); } catch {} });
+    S.clickNodes = [];
+    if (!S.click) return;
+    const downs = new Set((a.tempo?.downbeats || []).map((d) => d.toFixed(3)));
+    for (const b of beats) {
+      if (b < from) continue;
+      const when = S.started + (b - from) / rate();
+      const o = ctx().createOscillator(), g = ctx().createGain();
+      o.frequency.value = downs.has(b.toFixed(3)) ? 1800 : 1200;
+      g.gain.setValueAtTime(0.0001, when); g.gain.exponentialRampToValueAtTime(0.5, when + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, when + 0.05);
+      o.connect(g).connect(ctx().destination); o.start(when); o.stop(when + 0.06);
+      S.clickNodes.push(o);
+    }
+  };
+  async function play() {
+    if (!S.buf) {
+      if (!st.file) { $(".err", el).textContent = "No audio here (this analysis was opened by id): drop the file to listen."; return; }
+      $('[data-p="play"]', el).textContent = "loading…";
+      S.buf = await ctx().decodeAudioData(await st.file.arrayBuffer());
+    }
+    await ctx().resume();
+    S.src = ctx().createBufferSource();
+    S.src.buffer = S.buf;
+    S.src.playbackRate.value = rate();         // "at A440": played a hair slower / faster, so pitch AND tempo move by those cents
+    S.src.connect(ctx().destination);
+    S.started = ctx().currentTime + 0.05;
+    S.src.start(S.started, S.offset);
+    S.playing = true;
+    scheduleClicks(S.offset);
+    $('[data-p="play"]', el).textContent = "❚❚ Pause";
+    tick();
+  }
+  function stop(toStart = false) {
+    if (S.playing) { S.offset = toStart ? 0 : pos(); try { S.src.stop(); } catch {} }
+    S.playing = false;
+    S.clickNodes.forEach((n) => { try { n.stop(); } catch {} });
+    cancelAnimationFrame(S.raf);
+    $('[data-p="play"]', el).textContent = "▶ Play";
+    moveHead(S.offset);
+  }
+  function seek(t) { const was = S.playing; stop(); S.offset = Math.min(t, a.track.duration - 0.1); moveHead(S.offset); if (was) play(); }
+  $(".controls", el).onclick = (e) => {
+    const w = e.target.dataset.p;
+    if (w === "play") (S.playing ? stop() : play());
+    if (w === "click" || w === "retune") {
+      S[w] = !S[w];
+      e.target.setAttribute("aria-pressed", S[w]);
+      if (w === "retune" && a.detune) e.target.textContent = S[w] ? `At A440 (${-a.detune.cents >= 0 ? "+" : ""}${(-a.detune.cents).toFixed(1)} ¢)` : "Hear at A440";
+      if (S.playing) { const t = pos(); stop(); S.offset = t; play(); }
+    }
+  };
+  $(".controls", el).onchange = (e) => {
+    if (e.target.dataset.p === "tr") opts.tr = parseInt(e.target.value, 10);
+    if (e.target.dataset.p === "simple") opts.simple = e.target.checked;
+    draw();
+  };
+  draw();
+}
+
+// ------------------------------------------------------------------------------------------------ inputs
+async function runFiles(files) {
+  const list = [...files];
+  const cards = list.map((f) => ({ el: card(f.name), st: { file: f } }));
+  await api.analyzeQueue(list, {
+    options: { high_accuracy: $("#hiacc").checked },
+    onFileUpdate: (i, a) => render(cards[i].el, a, cards[i].st),
+  }).then((res) => res.forEach((r, i) => { if (r.status === "error" && !r.id) $(".err", cards[i].el).textContent = r.error; }));
+}
+window.__analyzeBlob = (blob, name) => runFiles([new File([blob], name, { type: blob.type })]);   // for automated checks
+
+const drop = $("#drop"), input = $("#file");
+drop.onclick = () => input.click();
+drop.onkeydown = (e) => (e.key === "Enter" || e.key === " ") && input.click();
+input.onchange = () => input.files.length && runFiles(input.files);
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); e.dataTransfer.files.length && runFiles(e.dataTransfer.files); };
+
+$("#linkform").onsubmit = async (e) => {
+  e.preventDefault();
+  const url = $("#link").value.trim();
+  if (!url) return;
+  const st = { file: null }, el = card(url);
+  try { await api.analyzeLink(url, { onUpdate: (a) => render(el, a, st) }); }
+  catch (err) {
+    $(".status", el).textContent = err.code;
+    $(".err", el).textContent = err.code === "upload_needed" ? "Not analysed yet: upload the song's file to analyse it." : err.message;
+  }
+};
+
+const qid = new URLSearchParams(location.search).get("id");
+if (qid) { const st = { file: null }, el = card(`analysis ${qid}`); api.watch(qid, { onUpdate: (a) => render(el, a, st) }).catch((err) => ($(".err", el).textContent = err.message)); }
+
+// ------------------------------------------------------------------------------------------------ mashup + Fix BPM
+function refreshMashup() {
+  const opts = [...done.values()].map((a) => `<option value="${a.id}">${esc(a.track?.title || a.track?.file_name || a.id)}</option>`).join("");
+  for (const id of ["#ma", "#mb"]) { const v = $(id).value; $(id).innerHTML = opts; if (v) $(id).value = v; }
+  if (done.size > 1 && $("#ma").value === $("#mb").value) $("#mb").selectedIndex = 1;
+}
+$("#mgo").onclick = async () => {
+  const a = $("#ma").value, b = $("#mb").value;
+  if (!a || !b || a === b) { $("#mout").textContent = "Analyse two songs first."; return; }
+  try {
+    const m = await api.match(a, b);
+    $("#mout").innerHTML = Object.values(m.display).map(esc).join("<br>") +
+      (m.key ? `<br><span class="muted">Camelot: ${esc(m.key.camelot_before ?? "not compatible")} → ${esc(m.key.camelot_after ?? "–")}</span>` : "");
+  } catch (err) { $("#mout").textContent = err.message; }
+};
+$("#fixform").onsubmit = async (e) => {
+  e.preventDefault();
+  const f = $("#fixfile").files[0];
+  if (!f) return;
+  const out = $("#fixout");
+  try {
+    const v = await api.fixBpm(f, { options: { target_bpm: parseFloat($("#fixbpm").value) || undefined, format: $("#fixfmt").value },
+      onUpdate: (j) => (out.textContent = `${j.status} · ${j.progress?.message || ""}`) });
+    out.innerHTML = `Done: <a href="${v.downloadUrl}">${esc(v.fix.file_name)}</a> · ${v.fix.target_bpm} BPM · stretched ${v.fix.stretch.fastest}–${v.fix.stretch.slowest}×` +
+      (v.fix.verify ? ` · ${v.fix.verify.on_grid_pct} % of clear hits on the grid` : "");
+  } catch (err) { out.textContent = `${err.code}: ${err.message}`; }
+};
 </script>
 </body>
 </html>
