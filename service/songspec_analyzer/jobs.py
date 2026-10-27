@@ -44,16 +44,16 @@ def rq_entry(aid, kind="analysis"):
 
 def run_fix_job(aid, store, settings):
     """Fix BPM: BPM Fixer's process() on the uploaded file; the output is kept for the requester until the audio TTL."""
-    from .tempo.fixbpm import run
+    from .tempo.fixbpm import D, run
     row = store.get(aid)
     store.update(aid, status="running")
     lines = []
     try:
         o = row["options"]
         out, info, lines = run(row["audio_path"], settings.fixed_dir, settings.models_dir, target_bpm=o.get("target_bpm"),
-                               signature=o.get("signature", "Auto"), bpm_mode=o.get("bpm_mode", "quarter"),
-                               fmt=o.get("format", "mp3"), keep_edges=o.get("keep_edges", True), loudness=o.get("loudness", True),
-                               verify=o.get("verify", True),
+                               signature=o.get("signature", D["signature"]), bpm_mode=o.get("bpm_mode", D["bpm_mode"]),
+                               fmt=o.get("format", "mp3"), keep_edges=o.get("keep_edges", D["keep_edges"]),
+                               loudness=o.get("loudness", D["loudness"]), verify=o.get("verify", D["verify"]),
                                log=lambda m: store.merge_result(aid, {"progress": {"stage": "fix", "message": m.strip()[:200]}}))
         rep = info["report"]
         store.update(aid, status="done", output_path=out, result={

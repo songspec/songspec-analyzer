@@ -75,6 +75,8 @@ def check():
     for f, what in (("third_party/skey/skey/models/skey.pt", "S-KEY (key)"), ("third_party/btc/test/btc_model_large_voca.pt", "BTC (chords)")):
         if not (ROOT / f).exists():
             missing.append(f"{f} ({what})")
+    if not (ROOT / "service" / "vendor" / "rubberband" / "rubberband-r3.exe").exists():
+        missing.append("service/vendor/rubberband/rubberband-r3.exe (Fix BPM falls back to a lower-quality stretcher)")
     for m in missing:
         say(f"WARNING: missing {m}")
 

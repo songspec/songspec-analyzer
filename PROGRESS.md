@@ -135,3 +135,13 @@ Waiting on the user (no work is blocked by these, but they decide the next accur
   estimator. No corrections collected yet; Qo's `data/analyzer.sqlite3` is where
   they will come from.
 - Mode table gained Melodic Minor, Harmonic Major, Lydian Dominant, Hungarian Minor (parsing, display, borrows, corrections).
+
+## Fix BPM matches the BPM Fixer app (2026-10-26)
+
+- Tester report: Fix BPM "lost some quality". The engine was already BPM Fixer's process() verbatim (re-running
+  tools/port_bpmfix.py changes nothing), but the tester build had no Rubber Band program, so it stretched with pylibrb
+  (real-time R3) instead of `rubberband-r3.exe` (offline R3 + time map), which the BPM Fixer app bundles.
+- `tools/fetch_vendor.py` (BPM Fixer's own recipe: conda-forge `rubberband-program-r3.exe` + soundfile's libsndfile as
+  sndfile.dll) fills `service/vendor/rubberband/`; the file is byte-identical to the installed app's (SHA-256 152316aa...).
+  `tempo/fixbpm.py` uses it first; the tester zip carries it (with COPYING); the launcher warns if it is missing.
+- Fix BPM defaults are now BPM Fixer's DEFAULTS (signature 4/4 instead of Auto).

@@ -16,7 +16,7 @@ Status per component: **ship** = verified and fine to serve; **eval only** = use
 | S-KEY (Deezer, `third_party/skey`) | key (fusion input) | code MIT; weights `skey.pt` (SHA-256 `78dfd0ad…5ead4`) ship inside the MIT repo, no separate weights licence stated | github.com/deezer/skey @ `918b83d`, 2026-10-26 | ship (approved by the user 2026-10-26; weights loaded with `weights_only=True`) |
 | BTC (Park et al., `third_party/btc`) | chords (blended with the templates) | MIT (code); weights `btc_model_large_voca.pt` (SHA-256 `1673d23f…ab51`) ship inside the MIT repo | github.com/jayg996/BTC-ISMIR19 @ `2682317`, 2026-10-26 | ship (approved by the user 2026-10-26; `weights_only=True`) |
 | nnAudio 0.3.3 | S-KEY's CQT | MIT | PyPI | ship (with S-KEY) |
-| Rubber Band (`rubberband-r3.exe` from BPM Fixer) | evaluation (pitch-shift test set); optional Fix BPM | GPL-2.0-or-later | – | eval only; server-side only if Fix BPM ships |
+| Rubber Band (`rubberband-r3.exe`, conda-forge `rubberband` 4.0.0, the same file BPM Fixer bundles) | evaluation (pitch-shift test set); Fix BPM | GPL-2.0-or-later | – | run as a separate program by the server, never linked. `tools/fetch_vendor.py` puts it in `service/vendor/rubberband/` with its COPYING and source note; the tester zip carries that folder, as the BPM Fixer installer does |
 | Essentia | baseline | AGPL-3.0 | – | eval only (not installed: no Windows wheel) |
 | madmom models | baseline | CC BY-NC-SA | – | eval only, not installed |
 | key-cnn (Schreiber) | baseline | to verify (likely AGPL-3.0) | – | not used yet |

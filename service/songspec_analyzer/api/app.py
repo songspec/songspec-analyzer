@@ -253,9 +253,10 @@ def create_app(settings: Settings = None) -> FastAPI:
     @app.post("/v1/fix-bpm", status_code=202)
     async def fix_bpm(request: Request, file: UploadFile = File(...), options: str = Form(None)):
         """Make a song run at one constant BPM: BPM Fixer's own engine (Rubber Band R3). Options (JSON): target_bpm (default: the
-        song's median), signature ('Auto', '4/4', '6/8' ...), bpm_mode ('quarter' | 'felt'), format ('mp3', 'wav', 'flac', ...),
+        song's median), signature ('4/4' (BPM Fixer's default), 'Auto', '6/8' ...), bpm_mode ('quarter' | 'felt'), format ('mp3', 'wav', 'flac', ...),
         keep_edges (leave intro / outro untouched), loudness (keep the original loudness)."""
         from ..tempo.fixbpm import FORMATS, rubberband_path
+        from ..tempo import _bpmfix_fix as bf
         from ..tempo._bpmfix_fix import HAVE_PYLIBRB
         key = client_key(request)
         if not rubberband_path() and not HAVE_PYLIBRB:
@@ -264,10 +265,12 @@ def create_app(settings: Settings = None) -> FastAPI:
             o = json.loads(options) if options else {}
         except ValueError:
             raise ApiError(422, "bad_options", "options must be a JSON object")
+        D = bf.DEFAULTS
         opts = {"target_bpm": float(o["target_bpm"]) if o.get("target_bpm") else None,
-                "signature": str(o.get("signature", "Auto")), "bpm_mode": "felt" if o.get("bpm_mode") == "felt" else "quarter",
+                "signature": str(o.get("signature") or D["signature"]),
+                "bpm_mode": "felt" if o.get("bpm_mode", D["bpm_mode"]) == "felt" else "quarter",
                 "format": o.get("format", "mp3") if o.get("format", "mp3") in FORMATS else "mp3",
-                "keep_edges": bool(o.get("keep_edges", True)), "loudness": bool(o.get("loudness", True))}
+                "keep_edges": bool(o.get("keep_edges", D["keep_edges"])), "loudness": bool(o.get("loudness", D["loudness"]))}
         check_rate(key)
         name = Path(file.filename or "upload").name
         dest = settings.uploads_dir / f"{uuid.uuid4().hex}_{name}"

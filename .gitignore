@@ -34,6 +34,9 @@ eval/results/
 .venv311/
 *.log
 
+# Rubber Band program for Fix BPM (tools/fetch_vendor.py)
+service/vendor/
+
 # compiled bindings (tools/build_native.py)
 *.pyd
 *.so
