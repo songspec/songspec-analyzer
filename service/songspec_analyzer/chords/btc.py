@@ -12,7 +12,9 @@ import numpy as np
 
 from .vocab import FLAT, labels as vocab_labels
 
-ROOT = Path(__file__).resolve().parents[3] / "third_party" / "btc"
+from ..config import third_party_dir
+
+ROOT = third_party_dir() / "btc"
 SR, N_BINS, BPO, HOP, CHUNK_S, TIMESTEP = 22050, 144, 24, 2048, 10.0, 108
 FRAME_S = CHUNK_S / TIMESTEP                           # BTC's own time unit (~0.0926 s)
 _Q = ["min", "maj", "dim", "aug", "min6", "maj6", "min7", "minmaj7", "maj7", "7", "dim7", "hdim7", "sus2", "sus4"]

@@ -145,3 +145,16 @@ Waiting on the user (no work is blocked by these, but they decide the next accur
   sndfile.dll) fills `service/vendor/rubberband/`; the file is byte-identical to the installed app's (SHA-256 152316aa...).
   `tempo/fixbpm.py` uses it first; the tester zip carries it (with COPYING); the launcher warns if it is missing.
 - Fix BPM defaults are now BPM Fixer's DEFAULTS (signature 4/4 instead of Auto).
+
+## 1.0 push (2026-10-31)
+
+- **Entry point without a server**: `from songspec_analyzer import analyze_file; analyze_file("song.mp3")` and
+  `python -m songspec_analyzer song.mp3 [--out r.json]`, returning the same JSON document as the API. The caller's file is never
+  touched (a copy is analysed); stdout stays pure JSON. Checked on real songs: *POP OUT* -> F Minor* (F Phrygian), 143.98 BPM,
+  +1.5 cents (tracker: F Minor*, F Phrygian, 144). Tests: `service/tests/test_entry.py`.
+- **No machine-specific paths**: S-KEY / BTC location is `SONGSPEC_THIRD_PARTY_DIR` (default: `third_party/` in the repo); the
+  eval scripts' catalog comes only from `SONGSPEC_CATALOG` or the git-ignored `eval/local.toml`.
+- **README "Dropping it into the SongSpec site"** + INTEGRATION.md updated (1.0 status, setup incl. S-KEY / BTC / Rubber Band,
+  in-process / CLI use, env vars).
+- **Key accuracy**: three targeted fixes measured on held-out songs, none beat the installed model, so none were installed
+  (`eval/REPORT.md` 3.9). Tempo, detune and chords unchanged (tempo stays BPM Fixer's engine; detune is within 0.3 cents).

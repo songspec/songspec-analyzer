@@ -76,6 +76,10 @@ class Store:
             self._db.execute("ALTER TABLE feedback ADD COLUMN file_sha256 TEXT")
         self._db.commit()
 
+    def close(self):
+        with self._lock:
+            self._db.close()
+
     # ---------------------------------------------------------------- analyses
     def create(self, source, file_name=None, options=None, audio_path=None, isrc=None):
         now = time.time()

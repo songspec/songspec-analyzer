@@ -58,6 +58,11 @@ class Settings:
         self.fixed_dir.mkdir(parents=True, exist_ok=True)
 
 
+def third_party_dir() -> Path:
+    """Where S-KEY and BTC live (tools/fetch_third_party.py): SONGSPEC_THIRD_PARTY_DIR, else third_party/ next to service/."""
+    return Path(_env("THIRD_PARTY_DIR", str(Path(__file__).resolve().parents[2] / "third_party")))
+
+
 _settings = None
 
 

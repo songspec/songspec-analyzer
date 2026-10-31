@@ -2,7 +2,7 @@
 
 For SongSpec's main dev. This repo is a **self-contained analysis service plus a headless JS client**. The UI is yours: nothing here decides layout, styling or components. `demo/` is only a test harness that shows every API feature.
 
-> Status: draft (milestone 1). The API shape and the result schema are stable (`/v1`, schema 1.x). The analysis stages fill in milestone by milestone; until a stage lands, its section is missing and `stages[name]` is `"unavailable"`. See `PROGRESS.md`.
+> Status: 1.0 candidate. The API shape and the result schema are stable (`/v1`, schema 1.x). A stage whose optional model is not installed reports `stages[name] = "unavailable"` and its section is missing; measured accuracy is in `eval/REPORT.md`.
 
 ## 1. Run it
 
@@ -12,6 +12,8 @@ python3.12 -m venv .venv
 .venv/Scripts/pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu   # or .../whl/cu130 for an NVIDIA GPU
 .venv/Scripts/pip install -r service/requirements.txt -e "service[dev]"                  # Linux/macOS: .venv/bin/pip
 .venv/Scripts/python tools/fetch_models.py      # vendored model weights, SHA-256 checked
+.venv/Scripts/python tools/fetch_third_party.py # S-KEY (key) and BTC (chords) at pinned commits; optional but they are the shipped accuracy
+.venv/Scripts/python tools/fetch_vendor.py      # Windows only: Rubber Band for Fix BPM (Linux: apt-get install rubberband-cli)
 .venv/Scripts/python tools/dev_server.py        # API + demo on http://127.0.0.1:8765 (demo at /demo/, client tests at /client/test/)
 ```
 Production-style:
@@ -19,6 +21,17 @@ Production-style:
 docker compose -f docker/compose.yaml up --build    # API on :8000, data in a named volume
 uvicorn songspec_analyzer.api.app:app --app-dir service --host 0.0.0.0 --port 8000 --workers 1   # same thing without Docker
 ```
+Without a server (a backend job, a script, a test): the same analysis and the same JSON document, in-process:
+```python
+from songspec_analyzer import analyze_file          # pip install -e service (plus the steps above)
+r = analyze_file("song.mp3")                         # options={"high_accuracy": True, "signature": "6/8"} like the API
+r["key"]["display"]["key"], r["tempo"]["bpm"], r["detune"]["cents"], r["chords"]["segments"]
+```
+```bash
+python -m songspec_analyzer song.mp3 --out result.json        # several files -> a JSON list; exit code 1 if one failed
+```
+The caller's file is never modified or deleted (a copy is analysed). Pass `data_dir=` / `--data-dir` to keep the job database and get cached results for audio seen before.
+
 Use **one** API process per data volume with the default inline queue (it runs analyses in a thread pool inside the API process). To scale out, set `SONGSPEC_QUEUE=redis` and run `rq worker songspec` processes that share the database and the uploads folder.
 
 ## 2. Configuration (environment variables)
@@ -37,6 +50,8 @@ Use **one** API process per data volume with the default inline queue (it runs a
 | `SONGSPEC_RATE_PER_MIN` / `SONGSPEC_RATE_BURST` | `10` / `5` | new analyses per client (by `X-SongSpec-User` header, else IP) |
 | `SONGSPEC_HIGH_ACCURACY` | `0` | default for the `high_accuracy` option (stem separation; slow on CPU) |
 | `SONGSPEC_SERVE_DEMO` | `0` | `1` mounts `/demo`, `/client` (development only) |
+| `SONGSPEC_MODELS_DIR` | `service/models` | vendored weights (`tools/fetch_models.py`) |
+| `SONGSPEC_THIRD_PARTY_DIR` | `third_party/` in the repo | S-KEY and BTC (`tools/fetch_third_party.py`); without them the key falls back to Centsible's detector and the chords to templates |
 | `SONGSPEC_HOOKTHEORY_USER` / `_PASSWORD` | (empty) | Hooktheory cross-check; off when empty |
 | `SONGSPEC_SPOTIFY_CLIENT_ID` / `_SECRET` | (empty) | ISRC lookup for Spotify links; optional |
 

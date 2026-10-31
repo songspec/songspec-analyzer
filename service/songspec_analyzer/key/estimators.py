@@ -6,14 +6,13 @@ centsible  Centsible's two-stage detector (Temperley scale + bass tonic), via th
 skey       S-KEY (Deezer, ICASSP 2025; MIT code, weights shipped in the same repo), third_party/skey
 """
 import sys
-from pathlib import Path
 
 import numpy as np
 
 from .profiles import PROFILES
 
 SR = 22050
-ROOT = Path(__file__).resolve().parents[3]
+from ..config import third_party_dir
 
 
 def softmax(x, temp=1.0):
@@ -93,16 +92,16 @@ _SKEY = {}
 
 
 def skey_available():
-    return (ROOT / "third_party" / "skey" / "skey" / "models" / "skey.pt").exists()
+    return (third_party_dir() / "skey" / "skey" / "models" / "skey.pt").exists()
 
 
 def _skey_load(device):
     if "m" in _SKEY:
         return _SKEY["m"]
     import torch
-    sys.path.insert(0, str(ROOT / "third_party" / "skey"))
+    sys.path.insert(0, str(third_party_dir() / "skey"))
     from skey.key_detection import key_map, load_model_components
-    ckpt_path = ROOT / "third_party" / "skey" / "skey" / "models" / "skey.pt"
+    ckpt_path = third_party_dir() / "skey" / "skey" / "models" / "skey.pt"
     # weights_only=True: no arbitrary pickle code. The checkpoint stores a few numpy scalars (its config), so exactly those numpy
     # types are allow-listed; anything else in the file would still be refused.
     from numpy._core import multiarray

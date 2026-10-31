@@ -42,7 +42,7 @@ def catalog_dir() -> Path:
     local = ROOT / "eval" / "local.toml"
     if local.exists():
         return Path(tomllib.loads(local.read_text(encoding="utf-8"))["catalog"])
-    return Path(r"C:\dev\detunetest\testdata")
+    raise SystemExit('Set SONGSPEC_CATALOG, or write eval/local.toml with  catalog = "path/to/testdata"  (git-ignored).')
 
 
 def load_labels():
