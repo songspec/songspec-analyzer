@@ -8,7 +8,9 @@ Protocol: NESTED cross-validation by artist group (key_eval.artist_group: 5 song
   ship    the configuration chosen by 5-fold CV over all groups, trained on all songs (service/.../key/fusion_model.json).
 Gate (PLAN.md): the fusion's outer score must beat the best single estimator (whose choice even gets to look at all songs);
 otherwise no model is installed and the service keeps Centsible's key.
-Run:  .venv/Scripts/python eval/key_fusion.py [--install]
+Chord features come from the chords the service actually recognises: BTC + templates (chords/engine.decode on the cached evidence in
+eval/results/chord_ev_v1); --chords templates uses the older template-only segments (eval/results/chords_v1).
+Run:  .venv/Scripts/python eval/key_fusion.py [--install] [--chords btc|templates]
 """
 import argparse
 import itertools
@@ -21,6 +23,8 @@ import numpy as np
 from common import RESULTS, ROOT, cache_path, load_labels, md_table
 from key_eval import artist_group, label_index, mirex
 
+from songspec_analyzer.chords.engine import decode
+from songspec_analyzer.chords.vocab import labels
 from songspec_analyzer.key import estimators as E
 from songspec_analyzer.key.chordkey import chord_features
 from songspec_analyzer.key.fusion import FEATURE_KINDS, KeyFusion, candidate_features, feature_matrix
@@ -36,6 +40,20 @@ SETS = {"centsible": ["centsible"],
                         "edma@naive"],
         "all": ["centsible"] + [f"{p}@{c}" for c in ("beat", "scale", "naive") for p in PROFILES]}
 GRID = list(itertools.product(SETS, FEATURE_KINDS, (0.03, 0.3, 3.0)))
+CHORDS = "btc"
+
+
+def song_chords(r):
+    """-> (segments, duration) of the chords the key features are computed from."""
+    ev = cache_path("chord_ev_v1", r["file"]).with_suffix(".npz")
+    if CHORDS == "btc" and ev.exists():
+        z = dict(np.load(ev))
+        e = {"labs": labels("full"), "logp": z["logp"].astype(float), "bb": z["bb"], "starts": z["starts"],
+             "end": float(z["end"][0]), "is_down": z["is_down"]}
+        return decode(e, z["btc"].astype(float)), float(z["duration"][0])
+    cp = cache_path("chords_v1", r["file"])
+    ch = json.loads(cp.read_text(encoding="utf-8")) if cp.exists() else {"segments": [], "duration": None}
+    return ch["segments"], ch["duration"]
 
 
 def load():
@@ -52,9 +70,7 @@ def load():
             continue                                    # every song needs every estimator (the fusion compares like with like)
         est["skey"] = np.asarray(json.loads(sk.read_text(encoding="utf-8"))["p"])
         tie = candidate_features(f["chroma_scale"], f["chroma_bass"], f.get("chroma_beat_seq"))
-        cp = cache_path("chords_v1", r["file"])
-        ch = json.loads(cp.read_text(encoding="utf-8")) if cp.exists() else {"segments": [], "duration": None}
-        chf = chord_features(ch["segments"], ch["duration"])
+        chf = chord_features(*song_chords(r))
         feats = {k: feature_matrix(k, tie, chf) for k in FEATURE_KINDS}
         out.append({"r": r, "g": artist_group(r["artist"]), "est": est, "feats": feats,
                     "y": label_index(r["keys"].split(";")[0])})
@@ -86,7 +102,10 @@ def cv_score(cfg, rows):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--install", action="store_true", help="write the model the service loads (only if it passes the gate)")
+    ap.add_argument("--chords", choices=["btc", "templates"], default="btc")
     a = ap.parse_args()
+    global CHORDS
+    CHORDS = a.chords
     data = load()
     groups = sorted({d["g"] for d in data})
     print(f"{len(data)} songs in artist groups {[sum(d['g'] == g for d in data) for g in groups]}", flush=True)
@@ -119,7 +138,7 @@ def main():
     worse = sum(f < b for (f, _), (b, _) in zip(fused, singles[best_single]))
     passed = f_mean > b_mean
     ship = max(GRID, key=lambda cfg: cv_score(cfg, data))
-    out = [f"# Key fusion ({time.strftime('%Y-%m-%d')})", "",
+    out = [f"# Key fusion ({time.strftime('%Y-%m-%d')}, chord features from {CHORDS} chords)", "",
            f"{len(data)} catalog songs with a tracker key, 5 artist groups of {[sum(d['g'] == g for d in data) for g in groups]} songs. "
            "Fusion = nested cross-validation (each group predicted by a model chosen and trained on the other four).", "",
            md_table(["estimator", "MIREX weighted", "exact", "MIREX per artist group", "fifth", "relative", "parallel", "other"], table), "",
@@ -134,7 +153,7 @@ def main():
             return 1
         m = fit(ship, data)
         d = m.to_dict()
-        d.update(trained=time.strftime("%Y-%m-%d"), songs=len(data), nested_cv_mirex=round(float(f_mean), 4),
+        d.update(trained=time.strftime("%Y-%m-%d"), songs=len(data), chords=CHORDS, nested_cv_mirex=round(float(f_mean), 4),
                  best_single=best_single, best_single_mirex=round(float(b_mean), 4))
         MODEL.write_text(json.dumps(d, indent=1) + "\n", encoding="utf-8")
         print(f"installed {MODEL}")

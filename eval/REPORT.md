@@ -210,6 +210,26 @@ song re-chose configurations and moved the tracker songs' score 0.601 -> 0.621 b
 songs, a better score on them, no loss on the tracker songs (0.005 slack) and a win over the best single estimator. No real
 corrections exist yet (tester builds collect them in data/analyzer.sqlite3).
 
+### 3.9 Three targeted key fixes tried for 1.0 (2026-10-31): none installed
+
+Same 165 songs, held-out by artist group. The installed fusion (Centsible + S-KEY + Albrecht-Shanahan on two chromas, no extra
+features) scores 0.601 / 46.1 % exact in nested CV, 0.621 / 49.1 % with its configuration held fixed.
+
+| change tried | held-out result | installed? |
+|---|---|---|
+| chord features from the chords the service actually recognises (BTC + templates) instead of the template-only chords | nested CV 0.595 / 43.6 % exact (-0.006) | no |
+| a minor-bias offset chosen inside the CV (the fusion calls 72 % of songs minor, the labels 61 %; 23 of the 30 relative errors are major songs called minor) | 0.621 / 49.1 %, the same (offsets chosen 0, 0, +0.15, +0.3, +0.15) | no |
+| strongly detuned songs named on the other side of the +-50 cent boundary, as the tracker's notes do ("Pitched up 0.5 semitones", key named before the shift) | 5 exact instead of 9 of the 32 songs at 35 cents or more | no |
+
+What the error analysis found: songs detuned by 35 cents or more (32 of 165, many pitched by half a semitone on purpose) are
+28 % exact against 53 % for songs within 15 cents. The estimators agree with each other on them (one-semitone disagreement
+0-9 %), so it is not a tuning-reference bug; the tracker names the key the song had before it was pitched, which the audio alone
+cannot tell. TODO after 1.0: for songs within ~5 cents of the boundary show both readings ("G Minor -49.6 c = F# Minor +50.4 c");
+more labelled songs (the fusion has 165); a 6/8 meter classifier for tempo (section 1.2).
+
+The fusion's fit is vectorised (same weights: max difference 4e-7 against the installed model), so the nested CV takes about two
+minutes instead of half an hour, and `key_retrain.py` retrains from user corrections as quickly.
+
 ## 4. Chords with BTC (approved by the user, 2026-10-26; `eval/chord_blend.py`)
 BTC (large vocabulary, 170 chords) runs on the tuning-corrected CQT and its per-frame probabilities are blended per beat with the
 template evidence before the same beat-synchronous Viterbi. No chord labels exist for the catalog, so the yardstick is a proxy: the

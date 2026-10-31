@@ -84,24 +84,22 @@ class KeyFusion:
     def fit(self, samples):
         """samples: [(est_probs, feats, true_index)]"""
         from scipy.optimize import minimize
-        Xs = [self._X(p, f) for p, f, _ in samples]
-        ys = [y for *_, y in samples]
-        d = Xs[0].shape[1]
+        X3 = np.stack([self._X(p, f) for p, f, _ in samples])          # songs x 24 candidates x d
+        ys = np.asarray([y for *_, y in samples])
+        n, d, idx = len(ys), X3.shape[2], np.arange(len(ys))
         # the estimator columns start from equal weights (a plain product of experts), features from 0
         w0 = np.zeros(d)
         w0[:len(self.names)] = 1.0 / max(1, len(self.names))
 
         def loss(w):
-            L, g = 0.0, np.zeros(d)
-            for X, y in zip(Xs, ys):
-                s = X @ w
-                s -= s.max()
-                p = np.exp(s)
-                p /= p.sum()
-                L -= np.log(p[y] + 1e-12)
-                g -= X[y] - p @ X
+            s = X3 @ w
+            s -= s.max(axis=1, keepdims=True)
+            p = np.exp(s)
+            p /= p.sum(axis=1, keepdims=True)
+            L = -np.log(p[idx, ys] + 1e-12).sum()
+            g = -(X3[idx, ys] - np.einsum("nk,nkd->nd", p, X3)).sum(axis=0)
             reg = self.l2 * np.sum((w - w0) ** 2)
-            return L / len(Xs) + reg, g / len(Xs) + 2 * self.l2 * (w - w0)
+            return L / n + reg, g / n + 2 * self.l2 * (w - w0)
 
         self.w = minimize(loss, w0, jac=True, method="L-BFGS-B").x
         return self
