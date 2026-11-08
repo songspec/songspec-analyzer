@@ -546,7 +546,7 @@ fn bessel_i0(x: f64) -> f64 {
 }
 
 /// High-quality band-limited resampling in the place of soxr "HQ" (librosa.resample's default; Beat This!'s front end).
-/// Linear phase, pass band to 91.3 % of the lower Nyquist, stop band from 100 %, about 125 dB rejection. Output length
+/// Linear phase, -6 dB at 95.7 % of the lower Nyquist, ~8.5 % transition, about 125 dB rejection (fitted to soxr HQ). Output length
 /// ceil(len * out / in), aligned like soxr (no added delay). `scale` = librosa's scale=True (divide by sqrt(ratio)).
 pub fn resample_hq(y: &[f32], sr_in: f64, sr_out: f64, scale: bool) -> Vec<f32> {
     if sr_in == sr_out {
@@ -555,9 +555,9 @@ pub fn resample_hq(y: &[f32], sr_in: f64, sr_out: f64, scale: bool) -> Vec<f32> 
     let ratio = sr_out / sr_in;
     let n_out = (y.len() as f64 * ratio).ceil() as usize;
     let lower = ratio.min(1.0);                         // lower Nyquist relative to the input Nyquist
-    let pass = 0.913;
-    let cutoff = 0.5 * (pass + 1.0) * lower;            // fraction of the input Nyquist
-    let trans = (1.0 - pass) * lower;                   // transition width, fraction of the input Nyquist
+    // fitted to soxr HQ's measured 44.1 -> 22.05 kHz response (eval: max gain error 0.004 over 10 - 11 kHz)
+    let cutoff = 0.957 * lower;                         // fraction of the input Nyquist
+    let trans = 0.085 * lower;                          // transition width, fraction of the input Nyquist
     let atten = 125.0;
     let beta = 0.1102 * (atten - 8.7);
     // taps on each side, in input samples: Kaiser's formula for the full length

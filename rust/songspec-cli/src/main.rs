@@ -26,6 +26,9 @@ fn dsp_check(file: &str, out: &str) {
     let y22 = dsp::resample_hq(x, sr, 22050.0, false);
     eprintln!("resample_hq {:?}", t.elapsed());
     dump(dir, "y22", &y22, &[y22.len()]);
+    let lm = songspec_core::beatthis::log_mel(&y22);
+    let lmf: Vec<f32> = lm.iter().flat_map(|r| r.iter().cloned()).collect();
+    dump(dir, "logmel", &lmf, &[lm.len(), 128]);
     let t = std::time::Instant::now();
     let yh = dsp::hpss_signal(&y22, 2.0, true);
     eprintln!("harmonic {:?}", t.elapsed());
@@ -64,6 +67,38 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(|s| s.as_str()) == Some("--dsp-check") {
         return dsp_check(&args[1], &args[2]);
+    }
+    if args.first().map(|s| s.as_str()) == Some("--tempo") {
+        // --tempo FILE [RAW.json]: BPM Fixer's cleaning on the given raw beats ({"beats": [...], "downbeats": [...]}) or on our own
+        let a = songspec_core::audio::decode_file(Path::new(&args[1])).unwrap();
+        let mono = a.mono();
+        let (raw, down) = if let Some(j) = args.get(2) {
+            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(j).unwrap()).unwrap();
+            let f = |k: &str| v[k].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect::<Vec<f64>>();
+            (f("beats"), f("downbeats"))
+        } else {
+            let models = songspec_core::models::ModelBytes::embedded();
+            let cache = songspec_core::models::PlanCache::default();
+            songspec_core::beatthis::detect(&mono, a.sr, &models, &cache).unwrap()
+        };
+        let t0 = std::time::Instant::now();
+        let r = songspec_core::tempo::analyze(&mono, a.sr as f64, &raw, &down, "Auto").unwrap();
+        let t = songspec_core::tempo::section_from_engine(&r);
+        let mut v = serde_json::to_value(&t).unwrap();
+        v["seconds"] = serde_json::json!(t0.elapsed().as_secs_f64());
+        println!("{}", v);
+        return;
+    }
+    if args.first().map(|s| s.as_str()) == Some("--beats") {
+        let models = songspec_core::models::ModelBytes::embedded();
+        let cache = songspec_core::models::PlanCache::default();
+        for f in &args[1..] {
+            let t0 = std::time::Instant::now();
+            let a = songspec_core::audio::decode_file(Path::new(f)).unwrap();
+            let (b, d) = songspec_core::beatthis::detect(&a.mono(), a.sr, &models, &cache).unwrap();
+            println!("{}", serde_json::json!({"file": f, "beats": b, "downbeats": d, "seconds": t0.elapsed().as_secs_f64()}));
+        }
+        return;
     }
     for f in &args {
         let t0 = std::time::Instant::now();

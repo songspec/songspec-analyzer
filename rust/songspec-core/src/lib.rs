@@ -10,3 +10,8 @@ pub mod audio;
 #[cfg(feature = "centsible")]
 pub mod centsible;
 pub mod dsp;
+pub mod models;
+pub mod beatthis;
+pub mod np;
+pub mod bpmfix;
+pub mod tempo;
