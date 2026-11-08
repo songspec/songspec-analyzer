@@ -126,8 +126,8 @@ listed in **[LICENSES.md](LICENSES.md)**.
 ## Disclaimer
 
 The **desktop app (the Rust code in `rust/`) was written 100 % with [Claude Code](https://claude.com/claude-code)**,
-Anthropic's AI coding assistant. The **analyzer itself is about 70 % Claude Code and 30 % me**: the tempo engine comes from my
-BPM Fixer, the detune and key core from my Centsible, the house style and every label it is tested against from our tracker,
+Anthropic's AI coding assistant. The **analyzer itself is about 70 % Claude Code and 30 % me**: the tempo engine comes from Deezy's
+BPM Fixer, the detune and key core from Centsible, the house style and every label it is tested against from our tracker,
 and the AI wrote most of the rest. I review what it writes, but I have not read every line, and AI-written code can contain
 mistakes I missed.
 
