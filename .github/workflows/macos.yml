@@ -21,10 +21,13 @@ env:
 jobs:
   macos:
     if: github.event_name != 'release' || !startsWith(github.event.release.tag_name, 'models-')
-    runs-on: macos-14
+    runs-on: macos-latest   # Apple Silicon
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+
+      - name: Apple Silicon runner
+        run: sw_vers && test "$(uname -m)" = arm64
 
       - name: Models
         env:
