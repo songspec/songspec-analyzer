@@ -82,6 +82,28 @@ pub fn signature_confidence(beats: &[f64], down: Option<&[f64]>, name: &str) -> 
     Some(py_round(ok as f64 / counts.len() as f64, 3))
 }
 
+/// 3 or 6 when the beat tracker's most common count per bar says 6/8 (at least 30 % of bars), else None.
+fn compound_meter(beats: &[f64], down: Option<&[f64]>) -> Option<usize> {
+    let down = down?;
+    if down.len() < 6 || beats.len() < 12 {
+        return None;
+    }
+    let tol = 0.3 * median(&diff(beats));
+    let idx: Vec<i64> = down.iter().map(|d| np::searchsorted(beats, d - tol) as i64).collect();
+    let counts: Vec<i64> = idx.windows(2).map(|w| w[1] - w[0]).collect();
+    let mut vals = counts.clone();
+    vals.sort();
+    vals.dedup();
+    let c: Vec<usize> = vals.iter().map(|v| counts.iter().filter(|x| *x == v).count()).collect();
+    let best = (0..vals.len()).fold(0, |b, i| if c[i] > c[b] { i } else { b });
+    let m = vals[best];
+    let share = c[best] as f64 / counts.len() as f64;
+    if m == 3 && share >= 0.85 {
+        return None; // bar after bar of 3: a waltz (3/4), not the messy bars of 6/8 (engine.WALTZ_MIN_SHARE)
+    }
+    ((m == 3 || m == 6) && share >= 0.3).then_some(m as usize)
+}
+
 /// Beat period from a robust straight-line fit of beat time against beat index (trims outliers twice).
 pub fn line_period(t: &[f64]) -> Option<f64> {
     if t.len() < 4 {
@@ -290,7 +312,15 @@ pub fn analyze(y: &[f32], sr: f64, raw: &[f64], down_raw: &[f64], signature: &st
     let down: Option<&[f64]> = if down_v.len() >= 4 { Some(&down_v) } else { None };
     let duration = y.len() as f64 / sr;
     let sig_auto = signature == "Auto";
-    let sig = if sig_auto { bf::infer_signature(&raw, down).map(|g| g.0).unwrap_or("4/4") } else { signature };
+    let mut sig = if sig_auto { bf::infer_signature(&raw, down).map(|g| g.0).unwrap_or("4/4") } else { signature };
+    // 6/8 (engine.compound_meter in the service): 3 per bar = eighths in dotted-quarter groups, cleaned as 3/4 and reported as
+    // 6/8 below; 6 per bar = a whole 6/8 bar
+    let compound = if sig_auto { compound_meter(&raw, down) } else { None };
+    match compound {
+        Some(3) => sig = "3/4",
+        Some(6) => sig = "6/8",
+        _ => {}
+    }
     let spec = bf::sig_spec(sig).ok_or_else(|| format!("unknown time signature {sig}"))?;
     let switches = find_switches(&raw, down);
     let beats: Vec<f64> = if switches.is_empty() {
@@ -368,16 +398,31 @@ pub fn analyze(y: &[f32], sr: f64, raw: &[f64], down_raw: &[f64], signature: &st
         }
     }
     let step = (iv.len() / 1500).max(1);
+    let sig_conf = if sig_auto { signature_confidence(&raw, down, sig) } else { Some(1.0) };
+    // 3 eighths per tracker bar: the felt 6/8 beat (a dotted quarter) is three of the tracker's beats; BPM Fixer's cleaning may
+    // have moved the grid to another octave, so the factor is measured
+    let f = if compound.is_some() { 3.0 * (median(&diff(&raw)) / median(&iv)).log2().round_ties_even().exp2() } else { 1.0 };
+    let mut sections = sections;
+    let mut main = main;
+    if f != 1.0 {
+        for s in sections.iter_mut().chain(std::iter::once(&mut main)) {
+            s.bpm = py_round(s.bpm / f, 2);
+            s.lo = s.lo.map(|v| py_round(v / f, 2));
+            s.hi = s.hi.map(|v| py_round(v / f, 2));
+            s.bpm_exact /= f;
+        }
+        sig = "6/8";
+    }
     let curve = Curve {
         t: beats[..beats.len() - 1].iter().step_by(step).map(|t| py_round(*t, 3)).collect(),
-        bpm: iv.iter().step_by(step).map(|p| py_round(bf::period_to_bpm(*p, &spec, BpmMode::Felt), 2)).collect(),
+        bpm: iv.iter().step_by(step).map(|p| py_round(bf::period_to_bpm(*p, &spec, BpmMode::Felt) / f, 2)).collect(),
     };
     Ok(Analysis {
         curve,
         bpm_raw_exact: main.bpm_exact,
-        bpm_raw: py_round(main.bpm, 2),
+        bpm_raw: main.bpm,
         signature: sig.to_string(),
-        signature_conf: if sig_auto { signature_confidence(&raw, down, sig) } else { Some(1.0) },
+        signature_conf: sig_conf,
         sections,
         irregularity_pct: py_round(irr, 2),
         drift_pct: main.drift_pct,

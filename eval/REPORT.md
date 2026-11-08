@@ -52,6 +52,36 @@ The steadiness flag is the **weak part**. `eval/tempo_tune.py` shows that the dr
 
 Target from PLAN.md: "> 95 % after the house rule on pop/EDM". **Not met**: 86.0 % within 1 % / 89.0 % within 4 % on this catalog (dense trap, 6/8 indie, live-ish pop). GiantSteps Tempo (EDM) is still to be run; the fixes above (compound meter, level choice) are scheduled with key v2 (milestone 6), where the chord/onset features they need are built anyway.
 
+### 1.3 6/8 (2026-11-08, `eval/meter_feat.py`, `tempo/engine.compound_meter`)
+
+The tracker writes a 6/8 song's BPM as its eighth-note tempo ("176*"). BPM Fixer's Auto signature needs 60 % of the beat tracker's
+bars to agree, and on 6/8 songs those bars are messy, so it fell back to 4/4 (or said 3/4 when 3 beats per bar was a clear
+majority). The tracker's raw beats per bar separate the meters on the catalog:
+
+| songs | most common count is 3 or 6 per bar | 4 per bar |
+|---|---|---|
+| the tracker says the song is in 6/8 / 12/8 (8 distinct) | 7 | 1 |
+| all other songs (149) | 1 | 135 |
+
+Rule: when 3 or 6 per bar is the most common count (in at least 30 % of bars), the song is 6/8. The tracker's beats are then eighth
+notes; BPM Fixer cleans the grid as usual, and the felt 6/8 beat (a dotted quarter) is three eighths at the octave the cleaned grid
+sits on. Exception: 3 beats in at least 85 % of bars stays 3/4 (a waltz's bars are regular; the catalog's 6/8 songs reach 71 %).
+That cut-off is not measured on real 3/4 songs: the catalog has none. A triplet-feel feature (onsets at a third vs a half of
+each beat) was tried as well and separated nothing.
+
+| | before | after |
+|---|---|---|
+| within 1 % of the tracker's main BPM | 86.0 % | **86.6 %** |
+| within 1 % of any listed BPM | 90.2 % | **91.5 %** |
+| within 4 % (Acc1) | 89.0 % | **89.6 %** |
+| within 4 %, octave errors forgiven (Acc2) | 92.7 % | 91.5 % |
+| songs the tracker calls 6/8 that we call 6/8 | 0 of 8 | **7 of 8** |
+
+Now right: *picking up hands* 180*, *GUIDE DOG* 176*, *tell me a joke* 172.5* (tracker 175), *MONDAY* 216* (the tracker's "works
+in 6/8 at 216"), *FORGONE* ~127*, *TEXAS BLUE* 150*, *fantasyworld*. Wrong now: *Tofu* (tracker 140, now 105* in 6/8). Still
+wrong: *RUIN MY LIFE* (the tracker only says "may work in 6/8"; 80 there, 320* here) and *Are We Still Friends* (4 per bar in the
+beat tracker's bars, so the rule does not see it). Acc2 drops because a tripled eighth tempo no longer lines up for a few songs.
+
 ## 2. Detune (milestone 3, 2026-10-26)
 
 ### 2.1 Parity with the Centsible plugin's DSP (`eval/detune_parity.py`)

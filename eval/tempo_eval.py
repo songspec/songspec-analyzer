@@ -35,6 +35,9 @@ CENTSIBLE_CLI = Path(r"C:\cb\cli\centsible_cli_artefacts\Release\centsible_cli.e
 INCONSISTENT = re.compile(r"inconsistent|played live", re.I)
 
 
+CACHE = "tempo_v4"          # v4: 6/8 detection (engine.compound_meter); v3 = before it
+
+
 def tracked(name, a):
     """Raw Beat This! output, cached per song as .npz."""
     p = cache_path("bt_raw", name).with_suffix(".npz")
@@ -105,7 +108,7 @@ def main():
     res = []
     for i, r in enumerate(rows, 1):
         try:
-            o = cached("tempo_v3", r["file"], lambda: run_service(r["file"], r["path"]), refresh=a.refresh)
+            o = cached(CACHE, r["file"], lambda: run_service(r["file"], r["path"]), refresh=a.refresh)
             if not a.no_baselines:
                 o["librosa"] = cached("librosa_bpm", r["file"], lambda: {"bpm": librosa_tempo(r["path"])})["bpm"]
         except Exception as e:

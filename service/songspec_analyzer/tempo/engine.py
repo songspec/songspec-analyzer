@@ -71,6 +71,31 @@ def signature_confidence(beats, down, name):
     return round(float(np.mean(ok)), 3)
 
 
+# 6/8 (eval/meter_feat.py, eval/REPORT.md 1.3). BPM Fixer's Auto signature needs 60 % of bars to agree, and on 6/8 songs the beat
+# tracker's bars are messy (30 - 50 % agree), so it fell back to 4/4; with a clear majority of 3 it said 3/4. On the catalog the
+# tracker's most common count is 3 or 6 beats per bar for 7 of the 8 songs the tracker calls 6/8 and for 1 of 149 others, so that
+# is the rule: 3 per bar = eighth notes in dotted-quarter groups (the bar the tracker marks is half a 6/8 bar), 6 per bar = a
+# whole 6/8 bar of eighths. Either way the eighth-note tempo is what the tracker writes ("176*").
+COMPOUND_MIN_SHARE = 0.3
+# A real 3/4 (waltz) also has 3 beats per bar, but bar after bar (the synthetic waltz test: 100 %); the catalog's 6/8 songs are
+# messy (30 - 71 %). 3 per bar in at least this share of bars stays 3/4. Not measured on real 3/4 songs: the catalog has none.
+WALTZ_MIN_SHARE = 0.85
+
+
+def compound_meter(beats, down):
+    """3 or 6 when the tracker's bars say 6/8 (see above), else None."""
+    if down is None or len(down) < 6 or len(beats) < 12:
+        return None
+    tol = 0.3 * float(np.median(np.diff(beats)))
+    counts = np.diff(np.searchsorted(beats, down - tol))
+    vals, c = np.unique(counts, return_counts=True)
+    m = int(vals[np.argmax(c)])
+    share = c.max() / len(counts)
+    if m == 3 and share >= WALTZ_MIN_SHARE:
+        return None
+    return m if m in (3, 6) and share >= COMPOUND_MIN_SHARE else None
+
+
 def line_period(t):
     """Beat period from a robust straight-line fit of beat time against beat index (trims outliers twice).
     A quantised track gives its exact grid tempo, where the median interval is only good to ~0.3 BPM."""
@@ -240,9 +265,15 @@ def analyze(y, sr, models_dir, signature="Auto", bpm_lo=80.0, bpm_hi=160.0, log=
     duration = len(y) / sr
     sig = signature or "Auto"
     sig_auto = sig == "Auto"
+    compound = None
     if sig_auto:
         guess = bf.infer_signature(raw, down)
         sig = guess[0] if guess else "4/4"
+        compound = compound_meter(raw, down)
+        if compound == 3:
+            sig = "3/4"            # cleaned as 3 eighths per (half) bar, reported as 6/8 below
+        elif compound == 6:
+            sig = "6/8"
     if sig not in bf.TIME_SIGNATURES:
         raise ValueError(f"unknown time signature {sig!r}")
     spec = bf.sig_spec(sig)
@@ -319,11 +350,24 @@ def analyze(y, sr, models_dir, signature="Auto", bpm_lo=80.0, bpm_hi=160.0, log=
                 dbs.append(float(beats[k]))
 
     step = max(1, len(iv) // 1500)
+    sig_conf = signature_confidence(raw, down, sig) if sig_auto else 1.0
+    if compound:
+        # the tracker's beats are eighth notes and the felt 6/8 beat (a dotted quarter) is three of them; BPM Fixer's cleaning
+        # may have moved the grid to another octave (quarter notes, to land in 80 - 160), so the factor is measured
+        f = 3.0 * 2.0 ** round(float(np.log2(float(np.median(np.diff(raw))) / float(np.median(iv)))))
+        sig, spec = "6/8", bf.sig_spec("6/8")
+        for s in sections:
+            for k in ("bpm", "lo", "hi"):
+                if s.get(k) is not None:
+                    s[k] = round(s[k] / f, 2)
+        felt_curve = felt_curve / f
+        bpm_raw = bpm_raw / f
+        med_felt /= f
     return {
         "bpm_raw": round(bpm_raw, 2),
         "signature": sig,
         "signature_auto": sig_auto,
-        "signature_conf": signature_confidence(raw, down, sig) if sig_auto else 1.0,
+        "signature_conf": sig_conf,
         "sections": sections,
         "irregularity_pct": round(irr, 2),
         "drift_pct": main["drift_pct"],
