@@ -1,37 +1,122 @@
-# SongSpec Analyzer
+<div align="center">
 
-Key, BPM, chords and detune analysis for songspec.org mashup producers: an HTTP service plus a headless JS client.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
+  <img src="docs/logo.svg" alt="SongSpec Analyzer" width="620">
+</picture>
 
-- `PLAN.md`: architecture, choices, evaluation, milestones
-- `PROGRESS.md`: what is done and measured
-- `INTEGRATION.md`: for SongSpec's main dev (run, configure, call, display)
-- `contract/`: the versioned result schema
+**Drop in a song. Get its key, BPM, chords, detune and borrowed chords, written the way the SongSpec tracker writes them.**
+
+![version](https://img.shields.io/badge/version-1.1.0-13265c?style=flat-square)
+![desktop](https://img.shields.io/badge/desktop-Windows%20.exe-13265c?style=flat-square)
+![web](https://img.shields.io/badge/web-HTTP%20API%20%2B%20JS%20client-13265c?style=flat-square)
+![rust](https://img.shields.io/badge/app-Rust%20%2B%20egui-64748b?style=flat-square)
+![python](https://img.shields.io/badge/service-Python%203.12-64748b?style=flat-square)
+
+<img src="docs/images/app.png" alt="The SongSpec Analyzer desktop app showing Bb Minor, 81.8 BPM, -18.5 cents" width="720">
+
+</div>
+
+---
+
+## What you get
+
+| | |
+|---|---|
+| **Key** | Key in tracker style (`Eb Minor`, `Db Major`, `Bb Minor*` with `A# Phrygian` for a mode), confidence, alternates, Camelot / Open Key, and key changes inside a song. |
+| **May borrow from** | Which scales the song's chords borrow from, for example `May borrow from C Mixolydian, C Minor`. Covers every mode, harmonic / melodic minor, and minor keys borrowing from their major. |
+| **BPM** | The tracker's house rule (80–160, `~` for live, `153 / 104` for beat switches), half / double values and the time signature. Uses BPM Fixer's engine. |
+| **Detune** | Cents off A440 and the A4 frequency (`−18.5 ¢`, `A4 = 435.32 Hz`), plus drift. Uses Centsible's engine. |
+| **Chords** | Chords on the beat grid, with roman numerals (`i–VI–III–VII ×8`), repeating progressions, and MIDI / ChordPro export. |
+| **What voted** | Every key estimator's answer, for when you want to know *why*. |
+
+---
+
+## Three ways to use it
+
+### 1. Desktop app (Windows)
+
+One file, `SongSpecAnalyzer.exe`. Double-click it and drop songs in; nothing to install (no Python, no runtimes).
+Songs are analysed one after another. Click one to see its results, and press play to listen.
+
+Build it yourself: see **[rust/README.md](rust/README.md)**. It comes down to `cargo build --release -p songspec-app`.
+
+### 2. On songspec.org (HTTP service + JS client)
 
 ```bash
-.venv/Scripts/python tools/dev_server.py                      # API + reference demo on http://127.0.0.1:8765
-cd service && ../.venv/Scripts/python -m pytest -q            # service tests
+docker compose -f docker/compose.yaml up --build        # API on :8000
 ```
 
-## Desktop app (v1.1)
+```js
+import { createClient } from "./client/analyzer-client.js";
+const result = await createClient({ baseUrl }).analyzeFile(file, { onUpdate: render });
+```
 
-`rust/` holds a native Windows app, `SongSpecAnalyzer.exe`: one portable file with no Python and no installer. It is the same
-analysis ported to Rust, and its results match the service on 19 of 20 songs (key, BPM, signature and detune; see
-`eval/results/rust_parity.md`). Build steps and checks are in `rust/README.md`. The web service below is unchanged.
+The client has no UI, so the site keeps full control of the look. Everything the site needs is in
+**[INTEGRATION.md](INTEGRATION.md)**: endpoints, settings, what each field means and how to display it.
 
-## Dropping it into the SongSpec site
+### 3. From Python or the command line
 
-Audio in, JSON out (`contract/analysis.schema.json`): `key` (tonic, scale, mode, Camelot, "May borrow from", section keys),
-`tempo` (BPM by the house rule, beats, downbeats, sections), `chords` (segments with roman numerals, progressions), `detune`
-(cents from A440, drift). Three ways in, same document from each:
+```python
+from songspec_analyzer import analyze_file
+r = analyze_file("song.mp3")
+r["key"]["display"]["key"], r["tempo"]["bpm"], r["detune"]["cents"]
+```
 
-1. **HTTP service (recommended for the site).** `docker compose -f docker/compose.yaml up --build` (API on :8000), or
-   `uvicorn songspec_analyzer.api.app:app --app-dir service`. The browser or the site's backend posts the file to
-   `POST /v1/analyses` and follows `GET /v1/analyses/{id}/events`; `client/analyzer-client.js` does all of that headlessly
-   (no UI, so the site keeps full control of the look): `createClient({ baseUrl }).analyzeFile(file, { onUpdate })`.
-2. **In-process Python:** `from songspec_analyzer import analyze_file; analyze_file("song.mp3")`.
-3. **CLI:** `python -m songspec_analyzer song.mp3 --out result.json`.
+```bash
+python -m songspec_analyzer song.mp3 --out result.json
+```
 
-Setup: Python 3.12, `pip install -r service/requirements.txt -e service`, then `tools/fetch_models.py` and
-`tools/fetch_third_party.py` (S-KEY and BTC, the shipped key and chord accuracy). Configuration is environment variables only
-(`SONGSPEC_*`; nothing machine-specific in the code); the full list, the API, the client and how to display each field are in
-`INTEGRATION.md`. Accuracy, measured on held-out songs: `eval/REPORT.md`.
+---
+
+## How accurate is it?
+
+Measured on held-out songs from the SongSpec tracker; the full details are in **[eval/REPORT.md](eval/REPORT.md)**.
+
+| | result |
+|---|---|
+| **BPM** | 86 % within 1 % of the tracker's BPM, 89 % within 4 % |
+| **Detune** | 0.27 ¢ average error on exactly shifted real music; 100 % within 2 ¢ |
+| **Key** | Right or a closely related key (MIREX score 0.60) on artists it never saw, with the most common error being the relative major / minor |
+| **May borrow from** | Names one of the tracker's scales on 46 % of the songs where the tracker names one |
+| **Desktop app vs the website** | Identical key, signature and detune on 20 / 20 test songs; BPM on 19 / 20 (one song is 0.1 BPM off) |
+
+---
+
+## Repository map
+
+| | |
+|---|---|
+| `service/` | The Python analysis service (API, pipeline, every analysis stage) |
+| `client/` | Headless JS client and house-style formatters for the site |
+| `rust/` | The desktop app: `songspec-core` (engine), `songspec-app` (window), `songspec-cli` |
+| `eval/` | Accuracy and parity measurements, and `REPORT.md` |
+| `contract/` | The JSON schema of a result |
+| `tools/` | Dev server, model fetchers, ONNX export, icon and logo makers, tester package |
+| `docker/` | The production image |
+
+More: [PLAN.md](PLAN.md) (design), [PROGRESS.md](PROGRESS.md) (what's done, with numbers), [LICENSES.md](LICENSES.md)
+(third-party code and models).
+
+```bash
+.venv/Scripts/python tools/dev_server.py                  # API + test page on http://127.0.0.1:8765
+cd service && ../.venv/Scripts/python -m pytest -q        # service tests
+cd rust && cargo test --release -p songspec-core          # engine tests
+```
+
+---
+
+## Disclaimer
+
+The **desktop app (the Rust code in `rust/`) was written 100 % with [Claude Code](https://claude.com/claude-code)**,
+Anthropic's AI coding assistant. The **analyzer itself is about 70 % Claude Code and 30 % me**: the tempo engine comes from my
+BPM Fixer, the detune and key core from my Centsible, the house style and every label it is tested against from our tracker,
+and the AI wrote most of the rest. I review what it writes, but I have not read every line, and AI-written code can contain
+mistakes I missed.
+
+The accuracy numbers above are measurements on our own song collection, not guarantees. Check the results that matter to you,
+and if something looks wrong, tell me or open an issue.
+
+---
+
+<div align="center"><sub>SongSpec Analyzer reads your audio; it never changes your files.</sub></div>
