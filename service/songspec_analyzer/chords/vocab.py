@@ -48,12 +48,14 @@ def templates(vocab="full"):
     return labs, np.array(T), np.array(pri)
 
 
-_ROOT = re.compile(r"^([A-G]b?)(.*?)(?:/([A-G]b?))?$")
+_ROOT = re.compile(r"^([A-G][b#]?)(.*?)(?:/([A-G][b#]?))?$")
+_PC = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 
 
 def split(label):
-    """'Ebmaj7' -> (3, 'maj7'); 'C/E' -> (0, ''); 'N' -> (None, None). Labels use flat spellings only."""
+    """'Ebmaj7' -> (3, 'maj7'); 'D#m' -> (3, 'm'); 'C/E' -> (0, ''); 'N' -> (None, None). Flat or sharp roots."""
     if label in ("N", "X"):
         return None, None
     m = _ROOT.match(label)
-    return FLAT.index(m.group(1)), m.group(2)
+    r = m.group(1)
+    return (_PC[r[0]] + (1 if r[1:] == "#" else -1 if r[1:] == "b" else 0)) % 12, m.group(2)

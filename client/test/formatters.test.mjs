@@ -14,6 +14,11 @@ export async function runAll(loadJson, loadFixture = null) {
     const k = pk(c.key);
     check(`key_note ${c.key}/${c.source}`, F.keyDisplay(k.tonic, k.mode, { source: c.source, sourceText: c.key }).note, c.expect);
   }
+  for (const c of C.mode_name) { const k = pk(c.key); check(`mode_name ${c.key}`, F.modeName(k.tonic, k.mode), c.expect); }
+  for (const c of C.chord_spelling) {
+    const k = pk(c.key);
+    check(`chord_spelling ${c.chord} in ${c.key}`, F.spellChord(c.chord, k.tonic, k.mode), c.expect);
+  }
   for (const c of C.camelot) {
     const k = pk(c.key);
     check(`camelot ${c.key}`, [F.camelot(k.tonic, k.mode), F.openKey(k.tonic, k.mode)], [c.camelot, c.open_key]);

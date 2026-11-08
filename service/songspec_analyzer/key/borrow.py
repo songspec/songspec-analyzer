@@ -17,8 +17,8 @@ song's chord time and MIN_SECONDS. TONIC_RULE: chords on the key's own root neve
 recogniser then flips the tonic between major and minor (eval/key_borrow.py: "F Major" in F Minor songs, "Phrygian Dominant" where
 the tracker hears Phrygian); a real Picardy third is rare by comparison.
 """
-from ..chords.vocab import FLAT, QUALITIES, split
-from ..display.key import MODES, norm_mode
+from ..chords.vocab import QUALITIES, split
+from ..display.key import MODES, mode_name, mode_tonic, norm_mode
 
 # (source id, tonic offset from the key's tonic, scale, penalty), most common first (that order breaks ties)
 SOURCES = [
@@ -59,7 +59,7 @@ def source_scale(sid, tonic):
 
 def source_name(sid, tonic):
     off, sc, _ = _SRC[sid]
-    return f"{FLAT[(tonic + off) % 12]} {_NAME.get(sc, MODES[sc][1])}"
+    return mode_name((tonic + off) % 12, {"ionian": "major", "aeolian": "minor"}.get(sc, sc))
 
 
 def borrowed(segments, tonic, mode):
@@ -78,14 +78,16 @@ def borrowed(segments, tonic, mode):
             if sid in cost:
                 cost[sid] += 1.0
     total, held = 0.0, {}
-    tonic_chords = {FLAT[tonic] + q for q in QUALITIES}  # see TONIC_RULE
+    def on_tonic(label):                                 # see TONIC_RULE
+        r, _ = split(label.split("/")[0])
+        return r == tonic % 12
     for s in segments:
         ns = chord_notes(s["chord"])
         if ns is None:
             continue
         d = s["end"] - s["start"]
         total += d
-        if not ns <= home and s["chord"].split("/")[0] not in tonic_chords:
+        if not ns <= home and not on_tonic(s["chord"]):
             c = held.setdefault(s["chord"].split("/")[0], [ns, 0.0, 0])
             c[1] += d
             c[2] += 1
@@ -124,7 +126,7 @@ def borrowed(segments, tonic, mode):
         if sec < max(MIN_SECONDS, MIN_SHARE * total):
             continue
         off, sc, _ = _SRC[m]
-        found.append({"from": source_name(m, tonic), "tonic": FLAT[(tonic + off) % 12], "mode": sc,
+        found.append({"from": source_name(m, tonic), "tonic": mode_tonic((tonic + off) % 12, {"ionian": "major", "aeolian": "minor"}.get(sc, sc)), "mode": sc,
                       "chords": [c[0] for c in sorted(cs, key=lambda c: -c[2])],
                       "seconds": round(sec, 1), "share": round(sec / total, 3)})
     found.sort(key=lambda f: -f["seconds"])

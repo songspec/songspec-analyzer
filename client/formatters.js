@@ -5,6 +5,11 @@
 
 export const FLAT_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
 export const SHARP_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+// the SongSpec tracker's key spellings (key field); mode names follow the parent, except SHARP_MODES on D#, G#, A#
+export const MAJOR_NAMES = ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+export const MINOR_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "G#", "A", "Bb", "B"];
+const SHARP_MODES = new Set(["phrygian", "locrian", "phrygian_dominant"]);
+const SHARP_MAJOR_KEYS = new Set([7, 2, 9, 4, 11, 6]); // G D A E B F#: chords spelled with sharps
 const PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 const MINUS = "−";
 
@@ -21,6 +26,10 @@ export const MODES = {
   locrian: ["Minor", "Locrian", [0, 1, 3, 5, 6, 8, 10]],
   harmonic_minor: ["Minor", "Harmonic Minor", [0, 2, 3, 5, 7, 8, 11]],
   phrygian_dominant: ["Minor", "Phrygian Dominant", [0, 1, 4, 5, 7, 8, 10]],
+  melodic_minor: ["Minor", "Melodic Minor", [0, 2, 3, 5, 7, 9, 11]],
+  harmonic_major: ["Major", "Harmonic Major", [0, 2, 4, 5, 7, 8, 11]],
+  lydian_dominant: ["Major", "Lydian Dominant", [0, 2, 4, 6, 7, 9, 10]],
+  hungarian_minor: ["Minor", "Hungarian Minor", [0, 2, 3, 6, 7, 8, 11]],
 };
 const PLAIN = new Set(["major", "minor", "ionian", "aeolian"]);
 
@@ -52,13 +61,36 @@ export function parseKey(text) {
 
 export const tonicName = (pc, spelling = "flat") => (spelling === "flat" ? FLAT_NAMES : SHARP_NAMES)[mod12(pc)];
 export const isMinor = (mode) => MODES[normMode(mode)][0] === "Minor";
-export const modeName = (tonic, mode, spelling = "flat") => `${tonicName(tonic, spelling)} ${MODES[normMode(mode)][1]}`;
-const spellingOf = (text) => (/^\s*[A-Ga-g]\s*[#♯]/.test(text || "") ? "sharp" : "flat");
+/** the tonic as the key field spells it (by the parent Major / Minor): "C#" in C# Minor, "Db" in Db Major */
+export const keyTonic = (pc, mode = "major") => (isMinor(mode) ? MINOR_NAMES : MAJOR_NAMES)[mod12(pc)];
+/** the tonic as a mode name spells it: "A# Phrygian", "Bb Dorian", "Db Mixolydian" */
+export function modeTonic(pc, mode) {
+  const m = normMode(mode);
+  return SHARP_MODES.has(m) && [3, 8, 10].includes(mod12(pc)) ? SHARP_NAMES[mod12(pc)] : keyTonic(pc, m);
+}
+/** "A# Phrygian", "C# Minor", "Eb Harmonic Minor" (tracker spelling; the old `spelling` argument is ignored) */
+export const modeName = (tonic, mode) => `${modeTonic(tonic, mode)} ${MODES[normMode(mode)][1]}`;
 
 /** "Bb Minor", "Bb Minor*" (modal), "Db Major" */
 export function houseKey(tonic, mode) {
   const m = normMode(mode);
-  return `${FLAT_NAMES[mod12(tonic)]} ${MODES[m][0]}${PLAIN.has(m) ? "" : "*"}`;
+  return `${keyTonic(tonic, m)} ${MODES[m][0]}${PLAIN.has(m) ? "" : "*"}`;
+}
+
+/** sharp key? (chords spelled C#, F#, G#) by the key signature of the parent major (relative major for a minor key) */
+export function sharpKey(tonic, mode) {
+  const rel = isMinor(mode) ? mod12(tonic + 3) : mod12(tonic);
+  return SHARP_MAJOR_KEYS.has(rel);
+}
+
+/** a chord label respelled for the key: "Db" -> "C#" in F# Major, unchanged in a flat key */
+export function spellChord(label, tonic, mode) {
+  if (label == null || label === "N" || label === "X" || tonic == null || !sharpKey(tonic, mode)) return label;
+  const m = CHORD_RE.exec(label);
+  if (!m) return label;
+  let out = SHARP_NAMES[parsePitch(m[1])] + m[2];
+  if (m[3]) out += "/" + SHARP_NAMES[parsePitch(m[3])];
+  return out;
 }
 
 export function camelot(tonic, mode) {
@@ -77,7 +109,7 @@ export function openKey(tonic, mode) {
 /** {key, note, camelot, open_key}; source "hooktheory" appends " - Key from Hook Theory"; sourceText keeps the source's spelling */
 export function keyDisplay(tonic, mode, { source = null, sourceText = null } = {}) {
   const m = normMode(mode);
-  let note = PLAIN.has(m) ? null : modeName(tonic, m, sourceText ? spellingOf(sourceText) : "flat");
+  let note = PLAIN.has(m) ? null : modeName(tonic, m);
   if (source === "hooktheory") note = note ? `${note} - Key from Hook Theory` : "Key from Hook Theory";
   return { key: houseKey(tonic, m), note, camelot: camelot(tonic, m), open_key: openKey(tonic, m) };
 }

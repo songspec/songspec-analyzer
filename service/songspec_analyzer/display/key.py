@@ -1,15 +1,25 @@
-"""Key names in house style.
+"""Key names in house style: the spellings of the SongSpec tracker. Every key name goes through key_tonic / mode_tonic below
+(and their twins in client/formatters.js and rust/songspec-core/src/notation.rs; service/tests/display_cases.json checks all three).
 
-- Flats for black-key tonics, full words: D# Minor -> "Eb Minor", C# Major -> "Db Major", F# -> "Gb", G# -> "Ab", A# -> "Bb".
-- A modal key is shown as its parent major/minor with an asterisk, the real mode goes in the note:
-  A# Phrygian -> key "Bb Minor*", note "A# Phrygian" (the note keeps the source's spelling; "- Key from Hook Theory" when Hooktheory was the source).
+- Key field, full words: Major tonics C Db D Eb E F F# G Ab A Bb B; Minor tonics C C# D Eb E F F# G G# A Bb B
+  ("Eb Minor", "Db Major", "C# Minor", "F# Major").
+- A modal key is shown as its parent major/minor with an asterisk, the real mode goes in the note: A# Phrygian -> key
+  "Bb Minor*", note "A# Phrygian". Mode names take their parent's spelling (Db Mixolydian, C# Dorian, Eb Harmonic Minor), except
+  Phrygian / Locrian / Phrygian Dominant on D#, G#, A#, which the tracker spells with sharps (D# Phrygian 170 times against
+  Eb Phrygian 7 times in its 57,857 rows). "- Key from Hook Theory" when Hooktheory was the source.
+- Chord roots follow the key signature: sharps in sharp keys (G D A E B F# Major and their relative minors: C#m, D#dim in
+  B Major), flats otherwise (Bb, Eb, Ab in C Major).
 - Several section keys: "C Minor* / C Major", note "Intro in C Phrygian Dominant, Verses & Choruses in C Major".
 - Camelot (8A = A Minor, 8B = C Major) and Open Key (1m = A Minor, 1d = C Major) as secondary labels.
 """
 import re
 
-FLAT_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
+FLAT_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]      # internal chord labels
 SHARP_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+MAJOR_NAMES = ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]      # the tracker's Major keys
+MINOR_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "G#", "A", "Bb", "B"]      # the tracker's Minor keys
+SHARP_MODES = {"phrygian", "locrian", "phrygian_dominant"}                          # D# / G# / A# Phrygian in the tracker
+SHARP_MAJOR_KEYS = {7, 2, 9, 4, 11, 6}                                              # G D A E B F#: chords spelled with sharps
 _PC = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 
 # mode -> (parent "Major"/"Minor", display name, interval set from the tonic)
@@ -64,20 +74,52 @@ def parse_key(text):
     return tonic, mode
 
 
+def key_tonic(pc, mode="major"):
+    """The tonic as the key field spells it, by the parent Major / Minor: 'C#' in C# Minor, 'Db' in Db Major."""
+    return (MINOR_NAMES if MODES[norm_mode(mode)][0] == "Minor" else MAJOR_NAMES)[pc % 12]
+
+
+def mode_tonic(pc, mode):
+    """The tonic as a mode name spells it: 'A# Phrygian', 'Bb Dorian', 'Db Mixolydian'."""
+    m = norm_mode(mode)
+    if m in SHARP_MODES and pc % 12 in (3, 8, 10):
+        return SHARP_NAMES[pc % 12]
+    return key_tonic(pc, m)
+
+
 def tonic_name(pc, spelling="flat"):
     return (FLAT_NAMES if spelling == "flat" else SHARP_NAMES)[pc % 12]
 
 
-def mode_name(tonic, mode, spelling="flat"):
-    """The real name of the key in the note: 'A# Phrygian' (sharp spelling kept when the source used it)."""
-    return f"{tonic_name(tonic, spelling)} {MODES[norm_mode(mode)][1]}"
+def mode_name(tonic, mode, spelling=None):
+    """The real name of the key in the note: 'A# Phrygian', 'C# Minor', 'Eb Harmonic Minor' (tracker spelling)."""
+    return f"{mode_tonic(tonic, mode)} {MODES[norm_mode(mode)][1]}"
 
 
 def house_key(tonic, mode):
-    """Key field in house style: 'Bb Minor', 'Bb Minor*' (modal), 'Db Major'."""
+    """Key field in house style: 'Bb Minor', 'Bb Minor*' (modal), 'Db Major', 'C# Minor', 'F# Major'."""
     mode = norm_mode(mode)
     parent = MODES[mode][0]
-    return f"{FLAT_NAMES[tonic % 12]} {parent}" + ("" if mode in PLAIN else "*")
+    return f"{key_tonic(tonic, mode)} {parent}" + ("" if mode in PLAIN else "*")
+
+
+def sharp_key(tonic, mode):
+    """Is this a sharp key (chords spelled C#, F#, G#)? By the key signature of the parent major (relative major for minor)."""
+    rel = tonic % 12 if MODES[norm_mode(mode)][0] == "Major" else (tonic + 3) % 12
+    return rel in SHARP_MAJOR_KEYS
+
+
+def spell_chord(label, tonic, mode):
+    """A chord label ('Db', 'Ebm7/Bb', 'N') respelled for the key: 'C#', 'D#m7/A#' in a sharp key, unchanged otherwise."""
+    if label in (None, "N", "X") or tonic is None or not sharp_key(tonic, mode):
+        return label
+    m = _CHORD_RE.match(label)
+    if not m:
+        return label
+    out = SHARP_NAMES[parse_pitch(m.group(1))] + m.group(2)
+    if m.group(3):
+        out += "/" + SHARP_NAMES[parse_pitch(m.group(3))]
+    return out
 
 
 def is_minor(mode):
@@ -110,7 +152,7 @@ def key_display(tonic, mode, source=None, source_text=None):
     mode = norm_mode(mode)
     note = None
     if mode not in PLAIN:
-        note = mode_name(tonic, mode, spelling_of(source_text) if source_text else "flat")
+        note = mode_name(tonic, mode)
     if source == "hooktheory":
         note = (note + " - Key from Hook Theory") if note else "Key from Hook Theory"
     return {"key": house_key(tonic, mode), "note": note, "camelot": camelot(tonic, mode), "open_key": open_key(tonic, mode)}
@@ -157,11 +199,12 @@ _ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"]
 _CHORD_RE = re.compile(r"^([A-G][#b]?)(.*?)(?:/([A-G][#b]?))?$")
 
 
-def chord_name(root, quality, bass=None):
-    """'Bbm', 'Ebmaj7', 'C/E'. Roots are always spelled with flats."""
-    s = FLAT_NAMES[root % 12] + quality
+def chord_name(root, quality, bass=None, sharp=False):
+    """'Bbm', 'Ebmaj7', 'C/E' (flats), or 'C#m', 'D#7' with sharp=True (a sharp key, see sharp_key)."""
+    names = SHARP_NAMES if sharp else FLAT_NAMES
+    s = names[root % 12] + quality
     if bass is not None and bass % 12 != root % 12:
-        s += "/" + FLAT_NAMES[bass % 12]
+        s += "/" + names[bass % 12]
     return s
 
 

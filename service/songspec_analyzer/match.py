@@ -7,14 +7,14 @@ Tempo: the ratio A / B at the metrical level closest to 1 (B's half or double te
 import math
 
 from .display.detune import MINUS, signed, wrap_cents
-from .display.key import FLAT_NAMES, camelot, house_key
+from .display.key import camelot, house_key, parse_pitch
 
 
 def _key(view):
     k = view.get("key") or {}
     if not k.get("tonic") or not k.get("scale"):
         return None
-    return FLAT_NAMES.index(k["tonic"]), k["scale"] == "minor"
+    return parse_pitch(k["tonic"]), k["scale"] == "minor"
 
 
 def camelot_relation(a, b):

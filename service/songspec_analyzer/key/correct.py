@@ -6,7 +6,7 @@ key.corrected.detected. Roman numerals, 'May borrow from' and the detune sentenc
 The stored analysis itself is never rewritten, so a correction can be superseded (the latest one wins) and the detected key stays
 available for retraining (eval/key_retrain.py learns from corrections + the key evidence saved per analysis).
 """
-from ..display.key import FLAT_NAMES, MODES, house_key, is_minor, key_display, norm_mode, parse_key
+from ..display.key import MODES, house_key, is_minor, key_display, key_tonic, mode_name, norm_mode, parse_key
 
 
 def normalise(text):
@@ -22,7 +22,7 @@ def choices():
         for m in MODES:
             if m in ("ionian", "aeolian"):
                 continue
-            out.append({"value": f"{FLAT_NAMES[t]} {MODES[m][1]}", "key": house_key(t, m), "tonic": FLAT_NAMES[t], "mode": m,
+            out.append({"value": mode_name(t, m), "key": house_key(t, m), "tonic": key_tonic(t, m), "mode": m,
                         "minor": is_minor(m)})
     return out
 
@@ -43,7 +43,7 @@ def apply(view, correction):
     kd = key_display(tonic, mode, source_text=correction["value"])
     minor = is_minor(mode)
     k = dict(key)
-    k.update(tonic=FLAT_NAMES[tonic], scale="minor" if minor else "major",
+    k.update(tonic=key_tonic(tonic, mode), scale="minor" if minor else "major",
              mode=None if mode in ("major", "minor", "ionian", "aeolian") else _mode_name(mode),
              camelot=kd["camelot"], open_key=kd["open_key"], ambiguous=False, sections=[], modulations=[],
              corrected={"key": kd["key"], "value": correction["value"], "at": correction.get("created_at"),
@@ -52,12 +52,13 @@ def apply(view, correction):
     segs = (view.get("chords") or {}).get("segments")
     if segs:
         from .borrow import borrow_note, borrowed
-        k["borrows"] = borrowed(segs, tonic, mode)
+        from .stage import respell
+        k["borrows"] = borrowed(respell([dict(x) for x in segs], tonic, mode), tonic, mode)
         bn = borrow_note(k["borrows"])
         note = f"{note} - {bn}" if note and bn else (note or bn)
         from ..chords import annotate, progressions
         ch = dict(view["chords"])
-        ch["segments"] = annotate([dict(s) for s in segs], tonic, mode)
+        ch["segments"] = annotate(respell([dict(s) for s in segs], tonic, mode), tonic, mode)
         downs = (view.get("tempo") or {}).get("downbeats")
         if downs and ch.get("progressions"):
             ch["progressions"] = progressions(ch["segments"], downs)

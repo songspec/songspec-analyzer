@@ -22,6 +22,16 @@ def test_key_note(c):
     assert K.key_display(tonic, mode, source=c["source"], source_text=c["key"])["note"] == c["expect"]
 
 
+@pytest.mark.parametrize("c", CASES["mode_name"], ids=lambda c: c["key"])
+def test_mode_name(c):
+    assert K.mode_name(*K.parse_key(c["key"])) == c["expect"]
+
+
+@pytest.mark.parametrize("c", CASES["chord_spelling"], ids=lambda c: f"{c['chord']}-{c['key']}")
+def test_chord_spelling(c):
+    assert K.spell_chord(c["chord"], *K.parse_key(c["key"])) == c["expect"]
+
+
 @pytest.mark.parametrize("c", CASES["camelot"], ids=lambda c: c["key"])
 def test_camelot(c):
     tonic, mode = K.parse_key(c["key"])

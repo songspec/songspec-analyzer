@@ -12,7 +12,7 @@ tonal evidence to read anything, CQT-120 answers with a 5-cent interval and low 
 import numpy as np
 
 from ..display.detune import detune_display
-from ..display.key import FLAT_NAMES, house_key, key_display
+from ..display.key import house_key, key_display, key_tonic
 from . import estimators as est
 
 MODE_BY_DEGREE = ["ionian", "dorian", "phrygian", "lydian", "mixolydian", "aeolian", "locrian"]
@@ -135,7 +135,7 @@ def key_quick(ctx):
     if detune:
         out["detune"] = detune
     out["key"] = {
-        "tonic": FLAT_NAMES[tonic], "scale": "minor" if d["minor"] else "major",
+        "tonic": key_tonic(tonic, mode), "scale": "minor" if d["minor"] else "major",
         "mode": None if mode in ("major", "minor") else mode.replace("_", " ").title(),
         "confidence": round(top, 3), "ambiguous": ambiguous, "camelot": kd["camelot"], "open_key": kd["open_key"],
         "candidates": cands, "sections": [], "modulations": [],

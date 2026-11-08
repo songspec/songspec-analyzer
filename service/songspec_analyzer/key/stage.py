@@ -8,7 +8,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ..display.key import FLAT_NAMES, camelot, house_key, key_display, open_key, sections_display
+from ..display.key import (camelot, house_key, key_display, key_tonic, mode_name, open_key, parse_pitch, sections_display,
+                           spell_chord)
 from . import KEY_NAMES, estimators as E
 from .borrow import borrow_note, borrowed
 from .chordkey import chord_features
@@ -102,7 +103,7 @@ def sections_from_windows(wk, duration, bar_len):
     return secs
 
 
-def _in_key_sections(seg, sections, tonic_name, minor):
+def _in_key_sections(seg, sections, tonic, minor):
     """Is this chord inside a section in the song's main key? (No sections: every chord is.) Borrowing is judged against the key
     the chord is played in, so a modulated final chorus does not read as borrowed chords."""
     if not sections:
@@ -110,8 +111,19 @@ def _in_key_sections(seg, sections, tonic_name, minor):
     mid = 0.5 * (seg["start"] + seg["end"])
     for s in sections:
         if s["start"] <= mid < s["end"]:
-            return s["key"].split()[0] == tonic_name and (s["display"].split()[1].rstrip("*") == "Minor") == minor
+            return parse_pitch(s["key"].split()[0]) == tonic % 12 and (s["display"].split()[1].rstrip("*") == "Minor") == minor
     return False
+
+
+def respell(segs, tonic, mode):
+    """Chord names in the key's spelling (C#m, F# in a sharp key; see display.key.spell_chord), in place."""
+    for s in segs:
+        s["chord"] = spell_chord(s["chord"], tonic, mode)
+        if s.get("triad") not in (None, "N"):
+            s["triad"] = spell_chord(s["triad"], tonic, mode)
+        if s.get("bass"):
+            s["bass"] = spell_chord(s["bass"], tonic, mode)
+    return segs
 
 
 def modulation_kind(k1, k2):
@@ -182,7 +194,7 @@ def stage(ctx):
                 modulations.append({"t": round(s2["start"], 2), "from": house_key(s1["k"] % 12, s1["mode"]),
                                     "to": house_key(s2["k"] % 12, s2["mode"]), "kind": modulation_kind(s1["k"], s2["k"])})
             sections = [{"start": round(s["start"], 2), "end": round(s["end"], 2),
-                         "key": f"{FLAT_NAMES[s['k'] % 12]} {_mode_name(s['mode'])}", "display": house_key(s["k"] % 12, s["mode"])}
+                         "key": mode_name(s["k"] % 12, s["mode"]), "display": house_key(s["k"] % 12, s["mode"])}
                         for s in secs]
     estimators = dict(prev.get("estimators") or {})
     for n in ("temperley2005@scale", "albrecht_shanahan@scale", "albrecht_shanahan@beat", "krumhansl@beat", "edma@naive"):
@@ -193,16 +205,17 @@ def stage(ctx):
         estimators["skey"] = {"key": KEY_NAMES[i], "p": round(float(est["skey"][i]), 3)}
     estimators["fusion"] = {"key": KEY_NAMES[top], "p": round(float(p[top]), 3), "source": source}
     out = {"key": {
-        "tonic": FLAT_NAMES[tonic], "scale": "minor" if minor else "major",
+        "tonic": key_tonic(tonic, mode), "scale": "minor" if minor else "major",
         "mode": None if mode in ("major", "minor") else _mode_name(mode),
         "confidence": round(float(p[top]), 3), "ambiguous": ambiguous, "camelot": camelot(tonic, mode), "open_key": open_key(tonic, mode),
         "candidates": cands, "sections": sections, "modulations": modulations, "borrows": [], "estimators": estimators,
         "metadata": prev.get("metadata") or {}, "preliminary": False, "display": display,
     }}
-    from ..chords import annotate, progressions
+    from ..chords import annotate, progressions, summary
     segs = ctx.data.get("chords")
     if segs:
-        main = [s for s in segs if _in_key_sections(s, sections, out["key"]["tonic"], minor)]
+        respell(segs, tonic, mode)
+        main = [s for s in segs if _in_key_sections(s, sections, tonic, minor)]
         out["key"]["borrows"] = borrowed(main, tonic, mode)
         bn = borrow_note(out["key"]["borrows"])
         if bn:
@@ -210,6 +223,7 @@ def stage(ctx):
         annotate(segs, tonic, mode)
         ch = ctx.store.get(ctx.aid)["result"].get("chords") or {}
         ch["segments"] = [{k: s[k] for k in ("start", "end", "chord", "triad", "roman", "bass", "conf", "on_downbeat")} for s in segs]
+        ch["summary"] = summary(segs)
         if tempo:
             ch["progressions"] = progressions(segs, tempo["downbeats"])
         out["chords"] = ch

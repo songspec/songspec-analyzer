@@ -172,7 +172,7 @@ def test_key_correction_applies_to_the_song(client, song):
     client.post(f"/v1/analyses/{aid}/feedback", json={"field": "key", "correct": "C Major"})
     assert client.get(f"/v1/analyses/{again['id']}").json()["key"]["display"]["key"] == "C Major"
     keys = client.get("/v1/keys").json()["keys"]
-    assert {"Bb Minor", "Db Major", "A Dorian", "F# Phrygian".replace("F#", "Gb")} <= {k["value"] for k in keys}
+    assert {"Bb Minor", "Db Major", "C# Minor", "A Dorian", "F# Phrygian", "A# Phrygian"} <= {k["value"] for k in keys}
 
 
 def test_key_evidence_is_saved_for_retraining(client, song):
