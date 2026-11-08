@@ -7,7 +7,7 @@
 
 **Drop in a song. Get its key, BPM, chords, detune and borrowed chords, written the way the SongSpec tracker writes them.**
 
-![version](https://img.shields.io/badge/version-1.1.0-13265c?style=flat-square)
+![version](https://img.shields.io/badge/version-1.2.0-13265c?style=flat-square)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-13265c?style=flat-square)
 ![desktop](https://img.shields.io/badge/desktop-Windows%20.exe-13265c?style=flat-square)
 ![web](https://img.shields.io/badge/web-HTTP%20API%20%2B%20JS%20client-13265c?style=flat-square)
@@ -33,9 +33,9 @@
 |---|---|
 | **Key** | Key in tracker style (`Eb Minor`, `Db Major`, `Bb Minor*` with `A# Phrygian` for a mode), confidence, alternates, Camelot / Open Key, and key changes inside a song. |
 | **May borrow from** | Which scales the song's chords borrow from, for example `May borrow from C Mixolydian, C Minor`. Covers every mode, harmonic / melodic minor, and minor keys borrowing from their major. |
-| **BPM** | The tracker's house rule (80–160, `~` for live, `153 / 104` for beat switches), half / double values and the time signature. Uses BPM Fixer's engine. |
+| **BPM** | The exact tempo to three decimals (`134.759`) with the tracker's rounded reading (80–160, `~` for live, `153 / 104` for beat switches), half / double values and the time signature. Uses BPM Fixer's engine. |
 | **Detune** | Cents off A440 and the A4 frequency (`−18.5 ¢`, `A4 = 435.32 Hz`), plus drift. Uses Centsible's engine. |
-| **Chords** | Chords on the beat grid, with roman numerals (`i–VI–III–VII ×8`), repeating progressions, and MIDI / ChordPro export. |
+| **Chords** | Chords on the beat grid, with roman numerals (`i–VI–III–VII ×8`), on a timeline you can play along to (click track, hear it at A440, transpose), plus MIDI / ChordPro export. |
 | **What voted** | Every key estimator's answer, for when you want to know *why*. |
 
 ---
@@ -45,7 +45,13 @@
 ### 1. Desktop app (Windows)
 
 One file, `SongSpecAnalyzer.exe`. Double-click it and drop songs in; nothing to install (no Python, no runtimes).
-Songs are analysed one after another. Click one to see its results, and press play to listen.
+**Add songs** takes audio files or links: Spotify tracks, albums and playlists, Apple Music songs and albums, and YouTube videos
+and playlists. A whole album is analysed song by song. Songs are analysed one after another; click one to see its results and
+play it along the chord timeline.
+
+Links are found on YouTube and downloaded with [yt-dlp](https://github.com/yt-dlp/yt-dlp), which the app fetches from its
+official release the first time you need it (you confirm first). Downloaded audio stays in a temporary cache and is deleted when
+the app closes.
 
 Build it yourself: see **[rust/README.md](rust/README.md)**. It comes down to `cargo build --release -p songspec-app`.
 
