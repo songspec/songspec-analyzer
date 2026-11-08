@@ -43,3 +43,7 @@ service/vendor/
 
 # third-party code fetched for evaluation (see LICENSES.md)
 third_party/
+
+# Rust desktop app: build output and the exported ONNX models (tools/export_onnx.py)
+rust/target/
+rust/models/

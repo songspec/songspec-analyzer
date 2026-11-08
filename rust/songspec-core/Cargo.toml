@@ -1,0 +1,24 @@
+[package]
+name = "songspec-core"
+description = "SongSpec analysis engine: key, BPM, chords, detune. No GUI or OS dependencies."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = ["centsible", "embedded-models"]
+# Centsible's C++ DSP (detune, its key detector) compiled in with cc; the exact code the plugin and the Python service run
+centsible = ["dep:cc"]
+# the three ONNX networks built into the binary (rust/models, made by tools/export_onnx.py)
+embedded-models = []
+
+[dependencies]
+tract-onnx = "0.23"
+rustfft = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "flac", "wav", "pcm", "ogg", "vorbis", "aac", "isomp4", "aiff", "adpcm", "alac"] }
+
+[build-dependencies]
+cc = { version = "1", optional = true }

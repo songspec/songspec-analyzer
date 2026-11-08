@@ -1,0 +1,15 @@
+[package]
+name = "songspec-cli"
+description = "Command line: audio files in, the analysis as JSON out (used by eval/rust_parity.py)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "songspec-cli"
+path = "src/main.rs"
+
+[dependencies]
+songspec-core = { path = "../songspec-core" }
+serde_json = "1"
