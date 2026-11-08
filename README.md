@@ -15,7 +15,14 @@
 
 <img src="docs/images/app.png" alt="The SongSpec Analyzer desktop app showing Bb Minor, 81.8 BPM, -18.5 cents" width="720">
 
+**[⬇ Download SongSpecAnalyzer.exe](https://github.com/songspec/songspec-analyzer/releases/latest)**
+
 </div>
+
+> [!NOTE]
+> **Memory:** the desktop app idles at about **75 MB**, but while it is analysing a song it briefly uses up to about
+> **2 GB** of RAM (the neural networks run several pieces of the song at once). It drops back to idle as soon as the queue is
+> done. On a PC with 4 GB of RAM or less, close other heavy programs while it works.
 
 ---
 
