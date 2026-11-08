@@ -17,6 +17,7 @@ pub struct Player {
     pub click_on: bool,
     pub retune_on: bool,
     retune_rate: f32,
+    volume: f32,
 }
 
 const CLICK_SR: u32 = 22050;
@@ -42,6 +43,7 @@ impl Player {
             click_on: false,
             retune_on: false,
             retune_rate: detune_cents.map(|c| 2f64.powf(-c / 1200.0) as f32).unwrap_or(1.0),
+            volume: 1.0,
         })
     }
 
@@ -105,6 +107,7 @@ impl Player {
             let c = rodio::Player::connect_new(&self.mixer);
             c.append(self.click_buffer());
             c.set_speed(self.song.speed());
+            c.set_volume(self.gain());
             let _ = c.try_seek(Duration::from_secs_f64(self.pos()));
             if self.song.is_paused() {
                 c.pause();
@@ -115,6 +118,19 @@ impl Player {
                 c.stop();
             }
         }
+    }
+
+    /// 0 = silent, 1 = the file's own level. Slider position is squared so the low end isn't all "barely audible".
+    pub fn set_volume(&mut self, v: f32) {
+        self.volume = v.clamp(0.0, 1.0);
+        self.song.set_volume(self.gain());
+        if let Some(c) = &self.clicks {
+            c.set_volume(self.gain());
+        }
+    }
+
+    fn gain(&self) -> f32 {
+        self.volume * self.volume
     }
 
     pub fn set_retune(&mut self, on: bool) {

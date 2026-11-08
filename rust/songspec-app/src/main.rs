@@ -91,6 +91,13 @@ struct App {
     transpose: i32,
     simple: bool,
     tl_view_w: f32,
+    /// the timeline's scroll offset last frame, and whether it follows the playhead (off after you scroll it yourself,
+    /// back on once the playhead is in view again: otherwise following and your scrolling fight every frame)
+    tl_off: f32,
+    tl_follow: bool,
+    /// playback volume (0..1), kept when switching songs
+    volume: f32,
+    muted_from: f32,
     flash: Option<(String, Instant)>,
     /// developer flag --screenshot PATH: once every queued song is done, save the window to PATH and quit
     screenshot: Option<PathBuf>,
@@ -196,7 +203,7 @@ impl App {
         let ytdlp = Arc::new(Mutex::new(if fetch::ytdlp().is_some() { Ytdlp::Ready } else { Ytdlp::Missing }));
         let mut app = App {
             shared, tx, selected: None, player: None, play_error: None, add: None, ytdlp, transpose: 0, simple: false,
-            tl_view_w: 800.0, flash: None, screenshot, shot_requested: false,
+            tl_view_w: 800.0, tl_off: 0.0, tl_follow: true, volume: 1.0, muted_from: 1.0, flash: None, screenshot, shot_requested: false,
         };
         // files and links given on the command line (or dropped onto the .exe) start in the queue
         let files: Vec<PathBuf> = raw.iter().map(PathBuf::from).filter(|p| p.is_file() && Some(p) != app.screenshot.as_ref()).collect();
@@ -622,6 +629,21 @@ impl App {
                     p.set_retune(!ret_on);
                 }
             }
+            // volume: click the speaker to mute / unmute
+            let icon = if self.volume <= 0.001 { "🔇" } else if self.volume < 0.5 { "🔉" } else { "🔊" };
+            if ui.add(egui::Button::new(icon).frame(false)).on_hover_text("Mute / unmute").clicked() {
+                self.volume = if self.volume <= 0.001 { self.muted_from.max(0.1) } else { self.muted_from = self.volume; 0.0 };
+                if let Some(p) = self.player.as_mut() {
+                    p.set_volume(self.volume);
+                }
+            }
+            let r = ui.add(egui::Slider::new(&mut self.volume, 0.0..=1.0).show_value(false)).on_hover_text(format!("Volume {:.0} %", 100.0 * self.volume));
+            if r.changed() {
+                if let Some(p) = self.player.as_mut() {
+                    p.set_volume(self.volume);
+                }
+            }
+            ui.add_space(8.0);
             ui.label(RichText::new("transpose chords").size(13.0).color(MUTED));
             egui::ComboBox::from_id_salt("tr").width(56.0).selected_text(if self.transpose > 0 { format!("+{}", self.transpose) } else { self.transpose.to_string() }).show_ui(ui, |ui| {
                 for n in -6..=6 {
@@ -639,7 +661,8 @@ impl App {
         self.player = None;
         let (beats, downs) = a.tempo.as_ref().map(|t| (t.beats.clone(), t.downbeats.clone())).unwrap_or_default();
         match player::Player::open(idx, path, a.track.duration, &beats, &downs, a.detune.as_ref().map(|d| d.cents)) {
-            Ok(p) => {
+            Ok(mut p) => {
+                p.set_volume(self.volume);
                 self.player = Some(p);
                 self.play_error = None;
             }
@@ -658,11 +681,12 @@ impl App {
         let mut seek = None;
         let mut sa = egui::ScrollArea::horizontal().id_salt("timeline").auto_shrink([false, true]);
         let px = x(pos);
-        if playing {
-            let off = ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::new("tl_off"))).unwrap_or(0.0);
-            if px < off + 40.0 || px > off + self.tl_view_w - 40.0 {
-                sa = sa.horizontal_scroll_offset((px - 80.0).max(0.0));
-            }
+        let in_view = |off: f32, view: f32| px >= off + 40.0 && px <= off + view - 40.0;
+        let mut set_to = None;
+        if playing && self.tl_follow && !in_view(self.tl_off, self.tl_view_w) {
+            let o = (px - 80.0).max(0.0);
+            sa = sa.horizontal_scroll_offset(o);
+            set_to = Some(o);
         }
         let frame = egui::Frame::new().stroke(Stroke::new(1.0, LINE)).corner_radius(10.0);
         frame.show(ui, |ui| {
@@ -751,7 +775,13 @@ impl App {
                 }
             });
             self.tl_view_w = out.inner_rect.width();
-            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("tl_off"), out.state.offset.x));
+            let off = out.state.offset.x;
+            if set_to.is_none() && (off - self.tl_off).abs() > 0.5 {
+                self.tl_follow = false; // you scrolled it
+            } else if in_view(off, self.tl_view_w) {
+                self.tl_follow = true;
+            }
+            self.tl_off = off;
         });
         seek
     }
