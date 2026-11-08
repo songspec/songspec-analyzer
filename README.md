@@ -8,6 +8,7 @@
 **Drop in a song. Get its key, BPM, chords, detune and borrowed chords, written the way the SongSpec tracker writes them.**
 
 ![version](https://img.shields.io/badge/version-1.1.0-13265c?style=flat-square)
+![license](https://img.shields.io/badge/license-AGPL--3.0-13265c?style=flat-square)
 ![desktop](https://img.shields.io/badge/desktop-Windows%20.exe-13265c?style=flat-square)
 ![web](https://img.shields.io/badge/web-HTTP%20API%20%2B%20JS%20client-13265c?style=flat-square)
 ![rust](https://img.shields.io/badge/app-Rust%20%2B%20egui-64748b?style=flat-square)
@@ -110,6 +111,15 @@ More: [PLAN.md](PLAN.md) (design), [PROGRESS.md](PROGRESS.md) (what's done, with
 cd service && ../.venv/Scripts/python -m pytest -q        # service tests
 cd rust && cargo test --release -p songspec-core          # engine tests
 ```
+
+---
+
+## License
+
+SongSpec Analyzer is free software under the **[GNU Affero General Public License v3.0 or later](LICENSE)** (AGPL-3.0+), like
+Centsible. You may use, study, change and share it; if you distribute it, or run a modified version as a network service, you
+must offer the source under the same licence. The models and libraries it uses are all MIT, Apache, BSD or similar; each one is
+listed in **[LICENSES.md](LICENSES.md)**.
 
 ---
 

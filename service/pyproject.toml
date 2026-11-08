@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "songspec-analyzer"
 version = "0.3.0"
 description = "Key, BPM, chord and detune analysis service for songspec.org"
+license = "AGPL-3.0-or-later"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.110",

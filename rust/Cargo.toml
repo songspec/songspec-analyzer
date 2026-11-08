@@ -5,8 +5,9 @@ members = ["songspec-core", "songspec-cli", "songspec-app"]
 [workspace.package]
 version = "1.1.0"
 edition = "2021"
-license = "UNLICENSED"
+license = "AGPL-3.0-or-later"
 publish = false
+repository = "https://github.com/songspec/songspec-analyzer"
 
 [profile.release]
 opt-level = 3
