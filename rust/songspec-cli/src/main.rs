@@ -100,19 +100,39 @@ fn main() {
         }
         return;
     }
-    for f in &args {
-        let t0 = std::time::Instant::now();
-        match songspec_core::audio::decode_file(Path::new(f)) {
-            Ok(a) => {
-                let mono = a.mono();
-                let t = songspec_core::centsible::analyze_tuning(&mono, a.sr as f64);
-                println!(
-                    "{}",
-                    serde_json::json!({"file": f, "sr": a.sr, "channels": a.channels, "duration": a.duration(),
-                        "tuning_valid": t.valid, "cents": t.cents, "ci": t.ci_cents, "seconds": t0.elapsed().as_secs_f64()})
-                );
-            }
-            Err(e) => println!("{}", serde_json::json!({"file": f, "error": e.to_string()})),
+    // FILE... [--out result.json]: the full analysis of each file (one JSON object per line, or a list with --out)
+    let mut files: Vec<String> = Vec::new();
+    let mut out: Option<String> = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--out" {
+            out = it.next().cloned();
+        } else {
+            files.push(a.clone());
         }
+    }
+    let engine = songspec_core::analysis::Engine::embedded();
+    let opts = songspec_core::analysis::Options::default();
+    let mut results = Vec::new();
+    for f in &files {
+        eprintln!("analysing {f} ...");
+        let v = match songspec_core::audio::decode_file(Path::new(f)) {
+            Ok(a) => match engine.analyze(&a, &opts, &|_| {}) {
+                Ok(r) => {
+                    let mut v = serde_json::to_value(&r).unwrap();
+                    v["file"] = serde_json::json!(f);
+                    v
+                }
+                Err(e) => serde_json::json!({"file": f, "error": e}),
+            },
+            Err(e) => serde_json::json!({"file": f, "error": e.to_string()}),
+        };
+        if out.is_none() {
+            println!("{}", v);
+        }
+        results.push(v);
+    }
+    if let Some(o) = out {
+        std::fs::write(o, serde_json::to_string_pretty(&results).unwrap()).unwrap();
     }
 }

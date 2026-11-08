@@ -15,3 +15,8 @@ pub mod beatthis;
 pub mod np;
 pub mod bpmfix;
 pub mod tempo;
+pub mod notation;
+pub mod chords;
+pub mod key;
+pub mod detune;
+pub mod analysis;
