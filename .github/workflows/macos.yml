@@ -1,0 +1,91 @@
+# The macOS (Apple Silicon) build: SongSpec Analyzer.app in a .dmg.
+# Run it by hand (Actions -> macOS build -> Run workflow): the .dmg is attached to the run as an artifact.
+# Publishing a release (not the models-* one) also builds it and attaches the .dmg to that release.
+# The three ONNX networks are not in git (rust/models is made by tools/export_onnx.py); the build takes them from the models-1
+# pre-release, checked against their SHA-256.
+name: macOS build
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+env:
+  MODELS_TAG: models-1
+  MODELS_ZIP: songspec-models-1.zip
+  MODELS_SHA256: 4c1fe2b6f3059a1f45faa85fe25bf1d5115bfc6e6a3707f4fac8f646c8e9db5b
+
+jobs:
+  macos:
+    if: github.event_name != 'release' || !startsWith(github.event.release.tag_name, 'models-')
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Models
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$MODELS_TAG" --repo "${{ github.repository }}" --pattern "$MODELS_ZIP" --dir "$RUNNER_TEMP"
+          echo "$MODELS_SHA256  $RUNNER_TEMP/$MODELS_ZIP" | shasum -a 256 -c -
+          mkdir -p rust/models
+          unzip -o "$RUNNER_TEMP/$MODELS_ZIP" -d rust/models
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Test
+        working-directory: rust
+        run: cargo test --release --workspace
+
+      - name: Build
+        working-directory: rust
+        run: cargo build --release -p songspec-app -p songspec-cli
+
+      - name: Smoke test (the CLI on a synthetic song)
+        run: |
+          python3 tools/make_test_song.py "$RUNNER_TEMP/test_song.wav"
+          rust/target/release/songspec-cli "$RUNNER_TEMP/test_song.wav" > "$RUNNER_TEMP/test_song.json"
+          python3 - "$RUNNER_TEMP/test_song.json" <<'EOF'
+          import json, sys
+          a = json.load(open(sys.argv[1]))
+          got = (a["key"]["display"]["key"], round(a["tempo"]["bpm_exact"], 1), a["tempo"]["signature"],
+                 [s["chord"] for s in a["chords"]["segments"]][:4], abs(a["detune"]["cents"]) < 2)
+          print(got)
+          # the Windows build gives C Major, 120.0, 4/4, C G Am F, 0.0 cents
+          assert got == ("C Major", 120.0, "4/4", ["C", "G", "Am", "F"], True), got
+          EOF
+
+      - name: Package
+        run: |
+          V=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
+          bash tools/make_macos_app.sh rust/target/release/SongSpecAnalyzer "$V" dist
+          ls -la dist
+
+      - name: Screenshot (the app from the .dmg opens and draws)
+        continue-on-error: true
+        run: |
+          MNT="$RUNNER_TEMP/mnt"
+          hdiutil attach dist/*.dmg -mountpoint "$MNT" -nobrowse
+          perl -e 'alarm shift; exec @ARGV' 600 "$MNT/SongSpec Analyzer.app/Contents/MacOS/SongSpecAnalyzer" \
+            --screenshot "$PWD/dist/screenshot.png" "$RUNNER_TEMP/test_song.wav"
+          hdiutil detach "$MNT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SongSpecAnalyzer-macOS-AppleSilicon
+          path: |
+            dist/*.dmg
+            dist/screenshot.png
+          if-no-files-found: warn
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.dmg --clobber --repo "${{ github.repository }}"

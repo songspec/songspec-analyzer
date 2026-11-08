@@ -262,14 +262,18 @@ impl App {
 }
 
 fn install_fonts(ctx: &egui::Context) {
-    // egui's built-in fonts lack ♭ ♯ ¢ −: use Windows' Segoe UI / Segoe UI Symbol when present (read at start, not bundled)
+    // egui's built-in fonts lack ♭ ♯ ¢ −: use the system's UI font and a symbol font when present (read at start, not bundled).
+    // Windows: Segoe UI / Segoe UI Symbol. macOS: SF (or Arial) / Arial Unicode (or Apple Symbols).
     let mut fonts = egui::FontDefinitions::default();
-    for (name, file) in [("segoe", "segoeui.ttf"), ("segoe_symbol", "seguisym.ttf")] {
-        let p = Path::new(r"C:\Windows\Fonts").join(file);
-        if let Ok(bytes) = std::fs::read(&p) {
-            fonts.font_data.insert(name.into(), Arc::new(egui::FontData::from_owned(bytes)));
-            fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(if name == "segoe" { 0 } else { 1 }, name.into());
-            fonts.families.entry(egui::FontFamily::Monospace).or_default().push(name.into());
+    let sets: [(&str, &[&str]); 2] = [
+        ("ui", &[r"C:\Windows\Fonts\segoeui.ttf", "/System/Library/Fonts/SFNS.ttf", "/System/Library/Fonts/Supplemental/Arial.ttf"]),
+        ("symbols", &[r"C:\Windows\Fonts\seguisym.ttf", "/System/Library/Fonts/Supplemental/Arial Unicode.ttf", "/System/Library/Fonts/Apple Symbols.ttf"]),
+    ];
+    for (i, (name, paths)) in sets.iter().enumerate() {
+        if let Some(bytes) = paths.iter().find_map(|p| std::fs::read(p).ok()) {
+            fonts.font_data.insert(name.to_string(), Arc::new(egui::FontData::from_owned(bytes)));
+            fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(i, name.to_string());
+            fonts.families.entry(egui::FontFamily::Monospace).or_default().push(name.to_string());
         }
     }
     ctx.set_fonts(fonts);
@@ -849,7 +853,7 @@ impl App {
                 Ytdlp::Ready => {}
                 Ytdlp::Missing | Ytdlp::Failed(_) => {
                     ui.add_space(4.0);
-                    ui.label(RichText::new("Links need yt-dlp (free, about 18 MB from its official GitHub release), which isn't installed yet.").size(13.0).color(WARN));
+                    ui.label(RichText::new("Links need yt-dlp (free, about 20–40 MB from its official GitHub release), which isn't installed yet.").size(13.0).color(WARN));
                     if ui.button("Get yt-dlp").clicked() {
                         *self.ytdlp.lock().unwrap() = Ytdlp::Installing;
                         let (state, ctx2) = (self.ytdlp.clone(), ctx.clone());

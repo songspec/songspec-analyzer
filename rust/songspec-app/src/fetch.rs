@@ -10,7 +10,15 @@ use std::process::Command;
 use sha2::{Digest, Sha256};
 
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
-const YTDLP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+// yt-dlp's release file for this OS, and the name it gets on disk
+#[cfg(windows)]
+const YTDLP_ASSET: &str = "yt-dlp.exe";
+#[cfg(target_os = "macos")]
+const YTDLP_ASSET: &str = "yt-dlp_macos";
+#[cfg(not(any(windows, target_os = "macos")))]
+const YTDLP_ASSET: &str = "yt-dlp_linux";
+const YTDLP_NAME: &str = if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" };
+const YTDLP_RELEASE: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/";
 const YTDLP_SUMS: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -201,34 +209,49 @@ pub fn expand(link: &Link, ytdlp: Option<&Path>) -> Result<Vec<Item>, String> {
 
 // ------------------------------------------------------------------------------------------------ yt-dlp
 
+/// Where the app keeps yt-dlp: %LOCALAPPDATA%\SongSpecAnalyzer on Windows, ~/Library/Application Support/SongSpecAnalyzer on macOS
+/// (never inside the .app bundle, which would break its signature).
 fn app_dir() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir).join("SongSpecAnalyzer")
+    let base = if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"))
+    } else {
+        std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+    };
+    base.unwrap_or_else(std::env::temp_dir).join("SongSpecAnalyzer")
 }
 
-/// yt-dlp next to the exe, in the app's folder, or on PATH.
+/// yt-dlp next to the exe (Windows), in the app's folder, or on PATH (plus Homebrew's folders: apps opened from the Finder get a
+/// bare PATH).
 pub fn ytdlp() -> Option<PathBuf> {
-    let mut cands = vec![app_dir().join("yt-dlp.exe")];
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(d) = exe.parent() {
-            cands.insert(0, d.join("yt-dlp.exe"));
+    let mut cands = vec![app_dir().join(YTDLP_NAME)];
+    if cfg!(windows) {
+        if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+            cands.insert(0, d.join(YTDLP_NAME));
         }
     }
-    if let Some(p) = cands.into_iter().find(|p| p.is_file()) {
-        return Some(p);
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    if cfg!(target_os = "macos") {
+        dirs.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
     }
-    std::env::var_os("PATH").and_then(|paths| std::env::split_paths(&paths).map(|d| d.join("yt-dlp.exe")).find(|p| p.is_file()))
+    cands.extend(dirs.into_iter().map(|d| d.join(YTDLP_NAME)));
+    cands.into_iter().find(|p| p.is_file())
 }
 
-/// Download yt-dlp.exe from its official release into the app's folder, checked against the release's SHA2-256SUMS.
+/// Download yt-dlp from its official release into the app's folder, checked against the release's SHA2-256SUMS.
 pub fn install_ytdlp() -> Result<PathBuf, String> {
     let sums = get(YTDLP_SUMS).map_err(|e| format!("couldn't reach GitHub ({e})"))?;
     let want = sums
         .lines()
-        .find_map(|l| l.strip_suffix("  yt-dlp.exe").or_else(|| l.strip_suffix(" yt-dlp.exe")).map(|h| h.trim().to_lowercase()))
-        .ok_or("yt-dlp's checksum list has no yt-dlp.exe")?;
+        .find_map(|l| {
+            let (h, f) = l.split_once(char::is_whitespace)?;
+            (f.trim_start_matches([' ', '*']) == YTDLP_ASSET).then(|| h.trim().to_lowercase())
+        })
+        .ok_or_else(|| format!("yt-dlp's checksum list has no {YTDLP_ASSET}"))?;
     let mut bytes = Vec::new();
     use std::io::Read;
-    ureq::get(YTDLP_URL)
+    ureq::get(format!("{YTDLP_RELEASE}{YTDLP_ASSET}"))
         .header("User-Agent", UA)
         .call()
         .map_err(|e| format!("download failed ({e})"))?
@@ -239,11 +262,16 @@ pub fn install_ytdlp() -> Result<PathBuf, String> {
         .map_err(|e| e.to_string())?;
     let got: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
     if got != want {
-        return Err("the downloaded yt-dlp.exe doesn't match its published checksum; not installed".into());
+        return Err(format!("the downloaded {YTDLP_ASSET} doesn't match its published checksum; not installed"));
     }
     std::fs::create_dir_all(app_dir()).map_err(|e| e.to_string())?;
-    let p = app_dir().join("yt-dlp.exe");
+    let p = app_dir().join(YTDLP_NAME);
     std::fs::write(&p, bytes).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+    }
     Ok(p)
 }
 
