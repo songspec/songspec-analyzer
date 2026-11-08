@@ -9,3 +9,4 @@ pub const ENGINE_VERSION: &str = "1.1.0";
 pub mod audio;
 #[cfg(feature = "centsible")]
 pub mod centsible;
+pub mod dsp;
