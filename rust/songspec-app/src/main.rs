@@ -189,9 +189,11 @@ fn fmt_time(t: f64) -> String {
 
 fn card(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::group(ui.style()).inner_margin(10.0).show(ui, |ui| {
-        ui.set_min_width(250.0);
-        ui.label(RichText::new(title).small().color(Color32::GRAY));
-        body(ui);
+        ui.set_width(ui.available_width());
+        ui.vertical(|ui| {
+            ui.label(RichText::new(title).small().color(Color32::GRAY));
+            body(ui);
+        });
     });
 }
 
@@ -384,8 +386,10 @@ impl App {
     }
 
     fn results(&mut self, ui: &mut egui::Ui, i: usize, a: &Analysis) {
-        ui.horizontal_wrapped(|ui| {
-            card(ui, "KEY", |ui| match &a.key {
+        // three equal columns on a wide window, stacked on a narrow one
+        let wide = ui.available_width() > 760.0;
+        let mut cols: Vec<Box<dyn FnOnce(&mut egui::Ui) + '_>> = Vec::new();
+        cols.push(Box::new(|ui: &mut egui::Ui| card(ui, "KEY", |ui| match &a.key {
                 Some(k) => {
                     ui.label(RichText::new(&k.display.key).size(30.0).strong().color(ACCENT));
                     if let Some(n) = &k.display.note {
@@ -405,8 +409,8 @@ impl App {
                 None => {
                     ui.label("No key could be read");
                 }
-            });
-            card(ui, "BPM", |ui| match &a.tempo {
+            })));
+        cols.push(Box::new(|ui: &mut egui::Ui| card(ui, "BPM", |ui| match &a.tempo {
                 Some(t) => {
                     ui.label(RichText::new(t.display.bpm.clone().unwrap_or("–".into())).size(30.0).strong().color(ACCENT));
                     if let Some(n) = &t.display.note {
@@ -420,8 +424,8 @@ impl App {
                 None => {
                     ui.label("No steady beat found");
                 }
-            });
-            card(ui, "DETUNE", |ui| match &a.detune {
+            })));
+        cols.push(Box::new(|ui: &mut egui::Ui| card(ui, "DETUNE", |ui| match &a.detune {
                 Some(d) => {
                     ui.label(RichText::new(&d.display.display).size(30.0).strong().color(ACCENT));
                     ui.label(format!("A4 = {:.2} Hz", d.a4_hz));
@@ -436,8 +440,19 @@ impl App {
                 None => {
                     ui.label("No steady tonal content");
                 }
+            })));
+        if wide {
+            ui.columns(3, |c| {
+                for (ui, f) in c.iter_mut().zip(cols) {
+                    f(ui);
+                }
             });
-        });
+        } else {
+            for f in cols {
+                f(ui);
+                ui.add_space(6.0);
+            }
+        }
         ui.add_space(6.0);
         if let Some(k) = &a.key {
             card(ui, "BORROWED CHORDS", |ui| {
