@@ -17,6 +17,8 @@ env:
   MODELS_TAG: models-1
   MODELS_ZIP: songspec-models-1.zip
   MODELS_SHA256: 4c1fe2b6f3059a1f45faa85fe25bf1d5115bfc6e6a3707f4fac8f646c8e9db5b
+  # runs on macOS 11 and later (the C++ compiler would otherwise target the runner's own macOS version)
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
 
 jobs:
   macos:

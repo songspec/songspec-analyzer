@@ -477,7 +477,7 @@ public:
         bool arbitrate = false;           // when the single fit and the richest template family disagree about the tuning, say so (checkModes): not locked, the interval covers both
         double competeApart = 3.0;        // cents: how far apart the two answers must be to disagree
     };
-    static inline Knobs knobs {};
+    static Knobs knobs;   // defined after the class: clang can't use Knobs' default member initializers inside it
 
     void prepare (double sampleRate)
     {
@@ -977,4 +977,5 @@ private:
     std::array<double, 8> recentCents {};
     centsible::Reading result;
 };
+inline SpectralLikelihoodEstimator::Knobs SpectralLikelihoodEstimator::knobs {};
 } // namespace centsible::detail
