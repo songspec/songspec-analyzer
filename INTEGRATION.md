@@ -115,7 +115,7 @@ Pure formatters for client-side transforms (all exported from the same module): 
 The schema is `contract/analysis.schema.json` (every field documented), with an example in `contract/examples/complete.json`.
 
 - **Partial results:** render each section as soon as `stages[name] === "done"`. Order: `detune` and `key_quick` (seconds), then `tempo`, `chords`, `key` (fused, with sections), `metadata`. `progress.message` is a ready-made status line ("Finding beats…").
-- **Display strings:** every user-facing value the brief specifies is precomputed in a `display` object in SongSpec's house style (flats, "Major"/"Minor", the asterisk for modal keys, the house BPM rule, "+23.4 ¢"). Show those as they are; the raw numbers beside them are for logic and custom visuals.
+- **Display strings:** every user-facing value the brief specifies is precomputed in a `display` object in SongSpec's house style (the tracker's key spellings: Major C Db D Eb E F F# G Ab A Bb B, Minor C C# D Eb E F F# G G# A Bb B; mode names like "A# Phrygian"; chord roots with sharps in sharp keys; "Major"/"Minor", the asterisk for modal keys, the house BPM rule, "+23.4 ¢"). Show those as they are; the raw numbers beside them are for logic and custom visuals.
 
 What the product brief asks the page to offer, as *suggestions* (your design decides the form):
 
@@ -157,9 +157,14 @@ What the product brief asks the page to offer, as *suggestions* (your design dec
 **Corrections.** When a user says the key is wrong (`correctKey` / `POST …/feedback` with `field: "key"`), every later view of that song (the same analysis, a re-upload of the same file or audio, a link matched to it) shows the corrected key: `tonic`, `scale`, `mode`, `camelot`, `open_key`, `display`, `borrows`, the chord roman numerals and the detune sentence all follow it, and `key.corrected` = `{key, value, at, by, detected}` keeps what the analyzer had said. The latest correction wins. Each analysis also stores what the key model saw (numbers only, no audio), so `eval/key_retrain.py --db <analyzer.sqlite3>` can retrain the key model from collected corrections; it installs a new model only when that beats the current one on held-out songs.
 
 ### Chord fields
-`chords.segments[]`: `start`, `end` (seconds), `chord` (`Bbm`, `Gbmaj7`, `C/E`, `N` = no chord), `triad` (for a "simplify" toggle), `roman` (relative to the key: `i`, `VI`, `♭VII`), `bass`, `conf` (0..1), `on_downbeat`. Chord changes are aligned to the beat grid. `chords.summary` lists every chord with its total seconds and count; `chords.progressions` the repeating loops (`{"roman": "i-VI-III-VII", "chords": "Bbm-Gb-Db-Ab", "count": 8, "display": "i–VI–III–VII ×8"}`). Transpose / simplify on the client: `transformChord(name, n, simplify)`; exports in the browser: `midi(analysis, {transpose})` (a `Uint8Array`, chords on the song's own beat grid with a tempo map, so it lines up with the audio in a DAW), `chordpro()`, `txt()`, `progressionText()`. Byte-identical to the server's `/exports/{midi|chordpro|txt}`.
+`chords.segments[]`: `start`, `end` (seconds), `chord` (`Bbm`, `Gbmaj7`, `C/E`, `N` = no chord; `C#m`, `F#maj7` in sharp keys), `triad` (for a "simplify" toggle), `roman` (relative to the key: `i`, `VI`, `♭VII`), `bass`, `conf` (0..1), `on_downbeat`. Chord changes are aligned to the beat grid. `chords.summary` lists every chord with its total seconds and count; `chords.progressions` the repeating loops (`{"roman": "i-VI-III-VII", "chords": "Bbm-Gb-Db-Ab", "count": 8, "display": "i–VI–III–VII ×8"}`). Transpose / simplify on the client: `transformChord(name, n, simplify)`; exports in the browser: `midi(analysis, {transpose})` (a `Uint8Array`, chords on the song's own beat grid with a tempo map, so it lines up with the audio in a DAW), `chordpro()`, `txt()`, `progressionText()`. Byte-identical to the server's `/exports/{midi|chordpro|txt}`.
 
 The audio for playback stays in the user's browser (the `File` they dropped). The service never sends audio back.
+
+**v1.1 change to watch for:** key names now use the tracker's spellings, so `key.tonic`, `key.display.key`, `candidates[].key`,
+`borrows[].from` and chord names can contain sharps ("C# Minor", "F# Major", "A# Phrygian", "C#m" in E Major). If the site
+matched on the old flat names ("Db Minor", "Gb Major"), compare by pitch class instead (`parseKey` / `parsePitch` in
+client/formatters.js accept both spellings). "May borrow from" now also names the parallel Major in minor keys ("Bb Major").
 
 ## 6. Versioning
 `schema_version` follows semver: 1.x only adds fields. `versions.engine` changes whenever results may change (the cache is keyed on it, so an engine update re-analyses on demand).

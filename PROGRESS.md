@@ -158,3 +158,28 @@ Waiting on the user (no work is blocked by these, but they decide the next accur
   in-process / CLI use, env vars).
 - **Key accuracy**: three targeted fixes measured on held-out songs, none beat the installed model, so none were installed
   (`eval/REPORT.md` 3.9). Tempo, detune and chords unchanged (tempo stays BPM Fixer's engine; detune is within 0.3 cents).
+
+## v1.1: native desktop app, tracker key spellings, minor-to-major borrowing (2026-11-07)
+
+- **Desktop app** (`rust/`, Rust + egui): one portable `SongSpecAnalyzer.exe` (about 130 MB with the three networks inside; static
+  C runtime, so no VC++ DLLs). It has a queue (drag-and-drop or picker), key + confidence + alternates, BPM + half/double,
+  detune in cents and A4 Hz, time signature, borrowed chords, chords, playback, "What voted" (collapsed), and Apple Music /
+  Spotify links (Apple's public search; Spotify as a search link). The ghost icon is from tools/make_icon.py.
+- **Engine** (`rust/songspec-core`, no GUI / OS dependencies): Beat This!, S-KEY and BTC exported to ONNX
+  (`tools/export_onnx.py`, each checked against PyTorch) and run with tract. Centsible's C++ is compiled in. librosa's STFT,
+  HPSS, onset strength, beat tracker and CQT are ported and checked stage by stage (`eval/rust_dsp_check.py`, about 1e-6).
+  BPM Fixer's engine is ported line for line (`eval/rust_tempo_check.py`: 40/40 identical on the same raw beats).
+- **Parity** (`eval/rust_parity.py`, 20 songs analysed from scratch by both): key 20/20, signature 20/20, detune 20/20
+  (within 0.5 ¢), BPM 19/20, chords identical on 100 % of the time. The one BPM difference (*sorry4dying*: 159.7 vs 159.8)
+  comes from the resampler: soxr's HQ filter has no Rust port, and the stand-in is fitted to its measured response
+  (identical below 10 kHz).
+- **Memory**: 74 MB idle (Task Manager "Memory", private working set) after analysing a song; 228 MB working set including
+  shared pages. Peak during an analysis is about 1.9 GB (four Beat This! chunks in parallel). The engine drops its compiled
+  networks when the queue is empty, and the decoded audio is freed after each song.
+- **Key spellings = the tracker's**, in one rule set mirrored in Python (`display/key.py`), JS (`client/formatters.js`) and Rust
+  (`notation.rs`), all tested against `service/tests/display_cases.json`.
+- **May borrow from: minor keys borrowing from the parallel Major.** A major tonic chord now counts when the song also clearly
+  plays its minor tonic and has little Phrygian bII; IV / ii merge into it. Measured against the tracker's notes: hits
+  43 -> 46 %, precision 48 % (unchanged). *NATURAL CAUSES* (tracker: "borrow heavily from Bb Major") now reads "May borrow
+  from Bb Major".
+- **Not in the app** (web-service features): the key-correction picker, Hook Theory, Spotify ISRC lookup.

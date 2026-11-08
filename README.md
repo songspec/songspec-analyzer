@@ -12,6 +12,12 @@ Key, BPM, chords and detune analysis for songspec.org mashup producers: an HTTP 
 cd service && ../.venv/Scripts/python -m pytest -q            # service tests
 ```
 
+## Desktop app (v1.1)
+
+`rust/` holds a native Windows app, `SongSpecAnalyzer.exe`: one portable file with no Python and no installer. It is the same
+analysis ported to Rust, and its results match the service on 19 of 20 songs (key, BPM, signature and detune; see
+`eval/results/rust_parity.md`). Build steps and checks are in `rust/README.md`. The web service below is unchanged.
+
 ## Dropping it into the SongSpec site
 
 Audio in, JSON out (`contract/analysis.schema.json`): `key` (tonic, scale, mode, Camelot, "May borrow from", section keys),
