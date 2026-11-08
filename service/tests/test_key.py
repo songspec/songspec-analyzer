@@ -117,7 +117,12 @@ def _segs(prog, dur=2.0):
     (["C", "Db", "G", "C", "Db", "F"] * 4, 0, "major", ["C Phrygian"]),           # bII
     (["Am", "D", "Am", "D", "Em", "G"] * 4, 9, "minor", ["A Dorian"]),            # IV in minor
     (["Am", "Bb", "Am", "Bb", "Dm", "Em"] * 4, 9, "minor", ["A Phrygian"]),       # bII in minor
-    (["Am", "A", "Dm", "Am", "A", "Dm"] * 4, 9, "minor", []),                     # tonic chords never count (3rd often missing)
+    (["Am", "A", "Dm", "Am", "A", "Dm"] * 4, 9, "minor", ["A Major"]),            # major I next to a clear minor i: parallel major
+    (["Am", "Dm", "E", "Am", "Dm", "A"] * 4, 9, "minor", ["A Harmonic Minor", "A Major"]),  # Picardy third (+ V: harmonic minor)
+    (["Am", "D", "Am", "D", "Am", "A"] * 4, 9, "minor", ["A Major"]),             # IV + major I: one parallel-major borrow
+    (["A", "Dm", "A", "G", "A", "Dm"] * 4, 9, "minor", []),                       # every tonic chord major: a third-less flip, ignored
+    (["Am", "A", "Bb", "Bb", "Am", "A"] * 4, 9, "minor", ["A Phrygian"]),         # Phrygian bII: the major tonic is a flip
+    (["C", "Cm", "F", "C", "Cm", "G"] * 4, 0, "major", []),                       # the minor tonic in a major key still never counts
     (["Am", "D", "Am", "Dbm", "Am", "D"] * 4, 9, "minor", ["A Major"]),           # IV + iii in minor: the parallel major
     (["C", "Fm", "G", "C", "Fm", "G"] * 4, 0, "major", ["C Minor"]),              # iv: the parallel minor
     (["C", "Bb", "Fm", "Ab", "C", "G"] * 4, 0, "major", ["C Minor"]),             # bVII + iv + bVI: the parallel minor
