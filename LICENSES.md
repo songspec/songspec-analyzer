@@ -11,8 +11,8 @@ Status per component: **ship** = verified and fine to serve; **eval only** = use
 
 | component | used for | licence | source checked | status |
 |---|---|---|---|---|
-| Centsible core (`service/native/centsible/core`) | detune, quick key | the user's own code | – | ship |
-| BPM Fixer engine (`tempo/_bpmfix_port.py`) | tempo | the user's own code | – | ship |
+| Centsible core (`service/native/centsible/core`) | detune, quick key | Centsible (github.com/songspec/centsible), AGPL-3.0-or-later | github.com/songspec/centsible | ship |
+| BPM Fixer engine (`tempo/_bpmfix_port.py`) | tempo | Deezy's BPM Fixer, ported; its licence and permission to publish it here under AGPL are **to confirm with Deezy** | – | **pending** |
 | Beat This! code (`beat-this` 1.1.0) | beat tracking | MIT | PyPI / CPJKU repo | ship |
 | Beat This! weights `final0.ckpt` | beat tracking (also inside the desktop exe, as ONNX) | MIT: "The code and the published model weights are released under the MIT license"; CPJKU notes some training files are copyrighted or under limited CC licences | github.com/CPJKU/beat_this README, 2026-11-07 | ship |
 | librosa 1.0.0, numpy, scipy, soundfile, soxr, scikit-learn | DSP | ISC / BSD / MIT | PyPI | ship |
@@ -35,8 +35,8 @@ Status per component: **ship** = verified and fine to serve; **eval only** = use
 
 | component | used for | licence |
 |---|---|---|
-| Centsible core (C++, compiled in) | detune, Centsible's key detector | the author's own code, AGPL-3.0-or-later here |
-| BPM Fixer engine (ported to Rust) | tempo | the author's own code, AGPL-3.0-or-later here |
+| Centsible core (C++, compiled in) | detune, Centsible's key detector | Centsible (github.com/songspec/centsible), AGPL-3.0-or-later |
+| BPM Fixer engine (ported to Rust) | tempo | Deezy's BPM Fixer: licence **to confirm with Deezy** |
 | Beat This! weights (ONNX) | beats | MIT (CPJKU) |
 | S-KEY weights (ONNX) | key | MIT (Deezer) |
 | BTC weights (ONNX) | chords | MIT (Park et al.) |
