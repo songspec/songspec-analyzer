@@ -1,0 +1,3 @@
+# a portable exe: link the C / C++ runtime statically (no MSVCP140 / VCRUNTIME140 DLLs needed on the user's PC)
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
