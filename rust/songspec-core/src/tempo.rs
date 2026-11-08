@@ -11,11 +11,21 @@ pub struct Section {
     pub start: f64,
     pub end: f64,
     pub bpm: f64,
+    /// the same tempo unrounded (the felt beat), for the exact display
+    #[serde(skip)]
+    pub bpm_exact: f64,
     pub lo: Option<f64>,
     pub hi: Option<f64>,
     pub drift_pct: f64,
     pub steadiness: String,
     pub core_share: f64,
+}
+
+/// Felt BPM per beat (downsampled to at most ~1500 points), for a tempo lane.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct Curve {
+    pub t: Vec<f64>,
+    pub bpm: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -29,6 +39,10 @@ pub struct TempoDisplay {
 #[derive(Debug, Clone, Serialize)]
 pub struct Tempo {
     pub bpm: Option<f64>,
+    /// the BPM at the house rule's level, to 3 decimals (130.000, 134.759): what the tempo actually measures, unrounded
+    pub bpm_exact: Option<f64>,
+    /// half and double of bpm_exact (3 decimals)
+    pub alternates_exact: Vec<f64>,
     pub bpm_raw: f64,
     pub alternates: Vec<f64>,
     pub signature: String,
@@ -41,6 +55,7 @@ pub struct Tempo {
     pub feel: String,
     pub beats: Vec<f64>,
     pub downbeats: Vec<f64>,
+    pub curve: Curve,
     pub display: TempoDisplay,
 }
 
@@ -224,7 +239,7 @@ fn section_stats(sb: &[f64], spec: &Spec) -> Section {
     let loc = local_tempo(sb, spec);
     let (start, end) = (py_round(sb[0], 3), py_round(sb[sb.len() - 1], 3));
     if loc.len() < 3 {
-        return Section { start, end, bpm: py_round(line_bpm, 2), lo: None, hi: None, drift_pct: 0.0, steadiness: "steady".into(), core_share: 1.0 };
+        return Section { start, end, bpm: py_round(line_bpm, 2), bpm_exact: line_bpm, lo: None, hi: None, drift_pct: 0.0, steadiness: "steady".into(), core_share: 1.0 };
     }
     let mode = bf::log_mode(&loc, &vec![1.0; loc.len()]);
     let core: Vec<f64> = loc.iter().cloned().filter(|v| (v / mode).ln().abs() <= CORE_BAND.ln_1p()).collect();
@@ -237,6 +252,7 @@ fn section_stats(sb: &[f64], spec: &Spec) -> Section {
         start,
         end,
         bpm: py_round(bpm, 2),
+        bpm_exact: bpm,
         lo: Some(py_round(lo, 2)),
         hi: Some(py_round(hi, 2)),
         drift_pct: py_round(drift, 2),
@@ -247,6 +263,7 @@ fn section_stats(sb: &[f64], spec: &Spec) -> Section {
 
 pub struct Analysis {
     pub bpm_raw: f64,
+    pub bpm_raw_exact: f64,
     pub signature: String,
     pub signature_conf: Option<f64>,
     pub sections: Vec<Section>,
@@ -255,6 +272,7 @@ pub struct Analysis {
     pub feel: String,
     pub beats: Vec<f64>,
     pub downbeats: Vec<f64>,
+    pub curve: Curve,
 }
 
 /// engine.analyze: y mono at the file's own rate, the tracker's raw beats / downbeats. `signature`: "Auto" or a name.
@@ -349,7 +367,14 @@ pub fn analyze(y: &[f32], sr: f64, raw: &[f64], down_raw: &[f64], signature: &st
             }
         }
     }
+    let step = (iv.len() / 1500).max(1);
+    let curve = Curve {
+        t: beats[..beats.len() - 1].iter().step_by(step).map(|t| py_round(*t, 3)).collect(),
+        bpm: iv.iter().step_by(step).map(|p| py_round(bf::period_to_bpm(*p, &spec, BpmMode::Felt), 2)).collect(),
+    };
     Ok(Analysis {
+        curve,
+        bpm_raw_exact: main.bpm_exact,
         bpm_raw: py_round(main.bpm, 2),
         signature: sig.to_string(),
         signature_conf: if sig_auto { signature_confidence(&raw, down, sig) } else { Some(1.0) },
@@ -384,6 +409,14 @@ pub fn house_bpm(raw: f64, signature: &str) -> (Option<f64>, bool) {
         b /= 2.0;
     }
     (Some(py_round(b, 2)), false)
+}
+
+/// The factor house_bpm applies in 4/4 (a power of two).
+fn house_factor(raw: f64) -> f64 {
+    match house_bpm(raw, "4/4").0 {
+        Some(b) if raw > 0.0 => (b / raw).log2().round().exp2(),
+        _ => 1.0,
+    }
 }
 
 /// 114.02 -> "114", 82.5 -> "82.5", 127.96 -> "128".
@@ -480,8 +513,17 @@ pub fn section_from_engine(r: &Analysis) -> Tempo {
         let t = vec![fmt_bpm(a[0]), fmt_bpm(a[1])];
         (a, t)
     };
+    // the house rule's octave (x2, /2, x3 for compound meters) applied to the unrounded tempo
+    let bpm_exact = bpm.map(|b| np::np_round(r.bpm_raw_exact * (b / r.bpm_raw), 3));
+    let alternates_exact = match (bpm_exact, COMPOUND.contains(&sig)) {
+        (Some(e), false) => vec![np::np_round(e / 2.0, 3), np::np_round(e * 2.0, 3)],
+        (Some(_), true) => vec![np::np_round(r.bpm_raw_exact * 2.0 * house_factor(r.bpm_raw * 2.0), 3), np::np_round(r.bpm_raw_exact * 1.5, 3)],
+        _ => vec![],
+    };
     Tempo {
         bpm,
+        bpm_exact,
+        alternates_exact,
         bpm_raw: r.bpm_raw,
         alternates: alts,
         signature: sig.to_string(),
@@ -494,6 +536,7 @@ pub fn section_from_engine(r: &Analysis) -> Tempo {
         feel: r.feel.clone(),
         beats: r.beats.clone(),
         downbeats: r.downbeats.clone(),
+        curve: r.curve.clone(),
         display: TempoDisplay { bpm: display, note: if notes.is_empty() { None } else { Some(notes.join(". ")) }, alternates: alt_text },
     }
 }
