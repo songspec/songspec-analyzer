@@ -4,7 +4,7 @@
 //! No GUI, windowing or OS APIs here: the crate works on decoded samples and bytes, so it can be compiled for WASM later
 //! (with the `centsible` feature off or Centsible built for the target).
 
-pub const ENGINE_VERSION: &str = "1.2.2";
+pub const ENGINE_VERSION: &str = "1.3.0";
 
 pub mod audio;
 #[cfg(feature = "centsible")]

@@ -574,11 +574,12 @@ impl App {
         let dur = a.track.duration;
         let key = exports::song_key(a);
         let key = key.as_ref().map(|(p, m)| (*p, m.as_str()));
-        let mine = self.player.as_ref().is_some_and(|p| p.index == idx);
-        let pos = if mine { self.player.as_ref().unwrap().pos() } else { 0.0 };
-        if mine && self.player.as_ref().unwrap().finished() {
+        // the song ran out: drop the player first, so `mine` (and every unwrap behind it) sees it gone
+        if self.player.as_ref().is_some_and(|p| p.index == idx && p.finished()) {
             self.stop();
         }
+        let mine = self.player.as_ref().is_some_and(|p| p.index == idx);
+        let pos = self.player.as_ref().filter(|p| p.index == idx).map_or(0.0, |p| p.pos());
         let segs = a.chords.as_ref().map(|c| c.segments.as_slice()).unwrap_or(&[]);
         let now = segs.iter().find(|s| s.start <= pos && pos < s.end);
         // now playing
@@ -591,7 +592,7 @@ impl App {
             ui.label(RichText::new(format!("{} / {}", fmt_t(pos), fmt_t(dur))).size(15.0).color(MUTED));
         });
         // timeline
-        if let Some(t) = self.timeline(ui, a, pos, mine && self.player.as_ref().unwrap().is_playing(), key) {
+        if let Some(t) = self.timeline(ui, a, pos, self.player.as_ref().is_some_and(|p| p.index == idx && p.is_playing()), key) {
             if !mine {
                 self.open_player(idx, path, a);
             }
@@ -602,7 +603,7 @@ impl App {
         // controls
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
-            let playing = mine && self.player.as_ref().unwrap().is_playing();
+            let playing = self.player.as_ref().is_some_and(|p| p.index == idx && p.is_playing());
             if ui.add(egui::Button::new(RichText::new(if playing { "⏸ Pause" } else { "▶ Play" }).color(Color32::WHITE)).fill(ACCENT)).clicked() {
                 if !mine {
                     self.open_player(idx, path, a);
@@ -611,7 +612,7 @@ impl App {
                     p.toggle();
                 }
             }
-            let click_on = mine && self.player.as_ref().unwrap().click_on;
+            let click_on = self.player.as_ref().is_some_and(|p| p.index == idx && p.click_on);
             if ui.add(egui::Button::new("Click track").selected(click_on)).clicked() {
                 if !mine {
                     self.open_player(idx, path, a);
@@ -620,7 +621,7 @@ impl App {
                     p.set_click(!click_on);
                 }
             }
-            let ret_on = mine && self.player.as_ref().unwrap().retune_on;
+            let ret_on = self.player.as_ref().is_some_and(|p| p.index == idx && p.retune_on);
             let ret_label = match (&a.detune, ret_on) {
                 (Some(d), true) => format!("At A440 ({}{:.1} ¢)", if -d.cents >= 0.0 { "+" } else { "" }, -d.cents),
                 _ => "Hear at A440".to_string(),

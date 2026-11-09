@@ -7,7 +7,7 @@
 
 **Drop in a song. Get its key, BPM, chords, detune and borrowed chords, written the way the SongSpec tracker writes them.**
 
-![version](https://img.shields.io/badge/version-1.2.1-13265c?style=flat-square)
+![version](https://img.shields.io/badge/version-1.3.0-13265c?style=flat-square)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-13265c?style=flat-square)
 ![desktop](https://img.shields.io/badge/desktop-Windows%20.exe-13265c?style=flat-square)
 ![web](https://img.shields.io/badge/web-HTTP%20API%20%2B%20JS%20client-13265c?style=flat-square)
