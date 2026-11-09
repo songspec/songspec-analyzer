@@ -192,7 +192,7 @@ fn fetch_audio(source: &Source, cache: &Path, set: &dyn Fn(Status), shared: &Arc
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         install_fonts(&cc.egui_ctx);
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        cc.egui_ctx.set_theme(egui::ThemePreference::Dark); // the website's dark look, whatever the system theme (its colours are built for a dark background)
         let shared = Arc::new(Mutex::new(Shared { songs: vec![], cache: fetch::session_cache(), reading_links: 0, link_errors: vec![] }));
         let (tx, rx) = channel();
         let s2 = shared.clone();
