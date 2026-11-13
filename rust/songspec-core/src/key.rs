@@ -677,6 +677,114 @@ pub fn fused_key(inp: &KeyInputs) -> Key {
     }
 }
 
+// ------------------------------------------------------------------------------------------- tonic and mode from the chords
+// eval/key_chord_mode.py, REPORT.md 3.5 (catalog: key exact 47.3 -> 49.1 %, mode 38.3 -> 44.5 %; nested CV 48.5 / 42.2 %)
+
+/// The chord the song lives on becomes the tonic when it holds HOME_MIN of the chord time and HOME_RATIO times the fused tonic's,
+/// and at least HOME_VOTES of the four plain key estimators name it as the tonic too. (Beautiful Liar: G 62 % of the chord time,
+/// C 4 %, four estimators say G and S-KEY's C Minor carried the fusion. MANNEQUIN has the same chords, one vote, and stays C.)
+const HOME_MIN: f64 = 0.3;
+const HOME_RATIO: f64 = 2.0;
+const HOME_VOTES: usize = 3;
+const HOME_ESTIMATORS: [&str; 4] = ["centsible", "albrecht_shanahan@scale", "albrecht_shanahan@beat", "temperley@scale"];
+/// A b2 on top of the tonic names the mode (Phrygian, Locrian, Phrygian Dominant) when it carries ALT_MIN of the chord tones and
+/// ALT_FRAC of it and the natural 2 together. The other modes are left to the borrow note: a natural 7 / 6 in minor or a b7 in
+/// major is usually one borrowed chord, and naming a mode from it was wrong on the catalog.
+const ALT_MIN: f64 = 0.04;
+const ALT_FRAC: f64 = 0.7;
+
+struct ChordEvidence {
+    root: [f64; 12],
+    root_major: [f64; 12],
+    root_minor: [f64; 12],
+    tones: [f64; 12],
+}
+
+fn chord_evidence(segs: &[Segment]) -> Option<ChordEvidence> {
+    let mut e = ChordEvidence { root: [0.0; 12], root_major: [0.0; 12], root_minor: [0.0; 12], tones: [0.0; 12] };
+    for s in segs {
+        let Some((r, q, _)) = nt::split_chord(&s.chord) else { continue };
+        let d = s.end - s.start;
+        e.root[r] += d;
+        match q.as_str() {
+            "" | "7" | "maj7" | "6" | "9" | "add9" => e.root_major[r] += d,
+            "m" | "m7" | "m6" => e.root_minor[r] += d,
+            _ => {}
+        }
+        let ivs: &[usize] = chords::quality(&q).map(|x| x.1).unwrap_or(&[0, 4, 7]);
+        for (j, i) in ivs.iter().enumerate() {
+            e.tones[(r + i) % 12] += d * if j < 3 { 1.0 } else { 0.5 };
+        }
+    }
+    let tot: f64 = e.root.iter().sum();
+    let tt: f64 = e.tones.iter().sum();
+    if tot <= 0.0 || tt <= 0.0 {
+        return None;
+    }
+    for i in 0..12 {
+        e.root[i] /= tot;
+        e.root_major[i] /= tot;
+        e.root_minor[i] /= tot;
+        e.tones[i] /= tt;
+    }
+    Some(e)
+}
+
+/// (tonic, mode id) from the chords, starting from the fused tonic and major / minor; `votes(pc)`: plain estimators naming pc.
+fn chord_tonic_mode(e: &ChordEvidence, tonic: usize, minor: bool, votes: &dyn Fn(usize) -> usize) -> (usize, &'static str) {
+    let (mut t, mut minor) = (tonic, minor);
+    let c = (0..12).fold(0, |b, i| if e.root[i] > e.root[b] { i } else { b });
+    if c != t && e.root[c] >= HOME_MIN && e.root[c] >= HOME_RATIO * e.root[t] && votes(c) >= HOME_VOTES {
+        t = c;
+        minor = e.root_minor[c] > e.root_major[c];
+    }
+    let h = &e.tones;
+    let alt = |nat: usize, alt: usize| {
+        let (a, n) = (h[(t + alt) % 12], h[(t + nat) % 12]);
+        a >= ALT_MIN && a / (a + n + 1e-9) >= ALT_FRAC
+    };
+    let mode = if minor {
+        if alt(2, 1) {
+            if alt(7, 6) { "locrian" } else { "phrygian" }
+        } else {
+            "minor"
+        }
+    } else if alt(2, 1) && alt(9, 8) {
+        "phrygian_dominant"
+    } else {
+        "major"
+    };
+    (t, mode)
+}
+
+/// Move the key to the tonic and mode the chords say (one-key songs only: a song with key sections keeps the sections' reading).
+pub fn refine_with_chords(key: &mut Key, segs: &[Segment]) {
+    if !key.sections.is_empty() {
+        return;
+    }
+    let Some(e) = chord_evidence(segs) else { return };
+    let votes = |pc: usize| {
+        key.estimators.iter().filter(|v| HOME_ESTIMATORS.contains(&v.name.as_str()) && nt::parse_key(&v.key).map(|k| k.0) == Some(pc)).count()
+    };
+    let (t, mode) = chord_tonic_mode(&e, key.tonic_pc, key.scale == "minor", &votes);
+    if t == key.tonic_pc && nt::is_plain(mode) {
+        return; // nothing new from the chords: keep the fused key (and Centsible's mode, if it named one)
+    }
+    let minor = nt::is_minor(mode);
+    key.tonic_pc = t;
+    key.mode_id = mode.into();
+    key.tonic = nt::key_tonic(t, mode).into();
+    key.scale = if minor { "minor".into() } else { "major".into() };
+    key.mode = if nt::is_plain(mode) { None } else { Some(title(mode)) };
+    key.camelot = nt::camelot(t, mode);
+    key.open_key = nt::open_key(t, mode);
+    let (k, n) = nt::key_display(t, mode);
+    key.display.key = k;
+    key.display.note = n;
+    // its "probability": the share of the chord time spent on the tonic
+    key.estimators.push(EstimatorVote { name: "chords".into(), key: nt::mode_name(t, mode), p: np::py_round(e.root[t], 3) });
+}
+
 /// Chords in the key's main sections (borrowing is judged against the key a chord is played in).
 fn in_key_sections(s: &Segment, key: &Key) -> bool {
     if key.sections.is_empty() {

@@ -82,6 +82,29 @@ in 6/8 at 216"), *FORGONE* ~127*, *TEXAS BLUE* 150*, *fantasyworld*. Wrong now: 
 wrong: *RUIN MY LIFE* (the tracker only says "may work in 6/8"; 80 there, 320* here) and *Are We Still Friends* (4 per bar in the
 beat tracker's bars, so the rule does not see it). Acc2 drops because a tripled eighth tempo no longer lines up for a few songs.
 
+### 1.4 6/8 from how the music groups the beats (2026-11-09, `eval/meter_group.py`, Rust `tempo::beat_grouping`)
+
+Two misses reported by the user: *Are We Still Friends* and J. Cole's *The Let Out* are in 6/8 and showed 4/4. The beat tracker's
+bar lines wander on them (Are We Still Friends: 4 beats in 50 % of its bars, 6 in 26 %, 2 in 15 %), so "3 or 6 is the most common
+count" does not fire. The music itself repeats every 3 beats either way. New feature, on the tracker's raw beats (Rust, computed
+only at the frames around each beat): the autocorrelation of the onset strength and of the low-band (< 150 Hz) onsets at lags of
+2, 3, 4, 6, 8, 12 beats; **score** = (onsets: best of lag 3 / 6 minus best of 4 / 8) + (bass: best of 3 / 6 / 12 minus best of
+4 / 8), and **share** = the tracker's bars of 3 or 6 beats.
+
+| | 6/8 songs (tracker, 9) | others (156) |
+|---|---|---|
+| score | +0.11 to +0.48 | the highest: +0.43 (*BEING YOURSELF*, share 0.18), *the memories we lost* +0.18 (share 0.29) |
+| share | 0.33 to 0.90 | the highest: 0.38 (*Tofu*, score -0.33), 0.29 |
+
+Rule (Rust, `TRIPLE_*`): 6/8 when share >= 0.3 and score >= 0.2, as well as by the 1.3 rule; and the 1.3 rule is vetoed when the
+score is negative (the bars count 3s but the music groups in 2s and 4s). Result: **9 of 9** tracker 6/8 songs (Are We Still Friends
+added), **0** false (Tofu, the 1.3 rule's one false 6/8, is vetoed). The thresholds sit in clear gaps (no song between share 0.29 and
+0.33 with a positive score; the veto at 0 against +0.10 for the lowest 6/8 song), but 9 songs is a small set.
+
+The BPM of a 6/8 song is its eighth-note tempo, and the beat tracker follows eighths on some songs (GUIDE DOG, 176) and quarters on
+others (Are We Still Friends, 91 -> 182 eighths). The octave is the one that puts the eighths in [115, 230): the 1.3 songs keep their
+values (127-216), Are We Still Friends reads 182-187* (tracker 182 / 191).
+
 ## 2. Detune (milestone 3, 2026-10-26)
 
 ### 2.1 Parity with the Centsible plugin's DSP (`eval/detune_parity.py`)
@@ -259,6 +282,38 @@ more labelled songs (the fusion has 165); a 6/8 meter classifier for tempo (sect
 
 The fusion's fit is vectorised (same weights: max difference 4e-7 against the installed model), so the nested CV takes about two
 minutes instead of half an hour, and `key_retrain.py` retrains from user corrections as quickly.
+
+### 3.10 Modes and the tonic from the chords (2026-11-09, `eval/key_chord_mode.py`, Rust `key::refine_with_chords`)
+
+Reported by the user: *Beautiful Liar* showed "C Minor, may borrow from C Harmonic Minor"; it is G Phrygian Dominant (same notes,
+the tonic is G). Its chords: G 62 % of the chord time, Ab 30 %, C minor 4 %. Four of the five estimators say G; S-KEY says C Minor
+and its weight carries the fusion. Evaluated on the Rust engine's own results for the catalog (165 songs, 128 with a usable mode
+label, 34 of them modal: 22 Phrygian):
+
+| rule | key exact | mode right | tonic moves: fixed / broke |
+|---|---|---|---|
+| 1.3 engine (fused key, plain major / minor) | 47.3 % | 38.3 % | |
+| tonic = the most-played chord when it dominates, modes from all scale degrees (first version) | nested CV 44.2 % | 32.8 % | 4 / 3 |
+| mode from a b2 on the fused tonic only | 47.3 % | 42.2 % | |
+| **+ tonic move only when 3 of the 4 plain estimators name the chord too (shipped)** | **49.1 %** | **44.5 %** | **3 / 0** |
+| the same, every parameter chosen by nested CV over artist groups | 48.5 % | 42.2 % | |
+
+What decided the shape of the rule:
+- *MANNEQUIN* has Beautiful Liar's chords exactly (G 67 %, Ab 33 %, bass on G) and the tracker calls it C Phrygian; chords alone
+  cannot tell the two apart. The estimators can: 1 of 4 says G on MANNEQUIN, 4 of 4 on Beautiful Liar. Every grid setting with the
+  estimator guard broke no song.
+- The wrong moves of the first version all came out "Lydian": the most-played chord was the IV, and the IV's #4 looks like Lydian.
+- A b2 in the chords names Phrygian / Locrian / Phrygian Dominant: 5 of the 11 Phrygian songs whose tonic is right are now named
+  (none before), and no song the tracker calls plain gets a mode when its tonic is right. Where the tonic is already wrong, 7 songs
+  now also carry a (wrong) "Phrygian" (*Sloppy Joe*, *Three worlds apart*, *Summer Love* ...). Harmonic Minor, Dorian and Mixolydian from the chords were wrong more often than right: a
+  natural 7 or 6 in minor or a b7 in major is usually one borrowed chord (V, IV, bVII), which the tracker writes as a borrow ("May
+  borrow from ..."), as the app already does. The remaining Phrygian songs carry the b2 in the melody, not in the chords.
+
+The Rust engine on the whole catalog, 1.3 -> 1.4 (with the 6/8 rule of 1.4): key exact 47.3 -> **49.1 %**, mode right 39.8 -> **44.5 %**
+(1.3 includes Centsible's own modes), BPM within 1 % 85.4 -> 86.0 %, within 4 % 86.6 -> 87.8 %, tracker 6/8 songs found 8 -> 9 of 9,
+false 6/8 1 -> 0. Seventeen songs changed in all; every change was checked against the tracker.
+
+The app shows a modal key by its mode ("G Phrygian Dominant", with the tracker's field "G Minor*" under it).
 
 ## 4. Chords with BTC (approved by the user, 2026-10-26; `eval/chord_blend.py`)
 BTC (large vocabulary, 170 chords) runs on the tuning-corrected CQT and its per-frame probabilities are blended per beat with the

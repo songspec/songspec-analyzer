@@ -162,6 +162,7 @@ impl Engine {
                 let downs: Vec<f64> = tempo_r.as_ref().map(|t| t.downbeats.clone()).unwrap_or_default();
                 let mut k = key::fused_key(&KeyInputs { centsible: ck, skey, beat_chroma: &bc, beat_energy: &be, beats: &beats, downbeats: &downs, duration });
                 if let Some(s) = segs.as_mut() {
+                    key::refine_with_chords(&mut k, s);
                     key::annotate_with_chords(&mut k, s);
                 }
                 if let Some(d) = det.as_mut() {

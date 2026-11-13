@@ -82,6 +82,18 @@ pub fn signature_confidence(beats: &[f64], down: Option<&[f64]>, name: &str) -> 
     Some(py_round(ok as f64 / counts.len() as f64, 3))
 }
 
+/// A song whose bars are 3 or 6 beats in at least TRIPLE_SHARE of the tracker's bars, and whose onsets and bass repeat every 3 / 6
+/// beats more than every 4 / 8 (Grouping::triple_on + triple_bass >= TRIPLE_SCORE), is in 6/8 even when 4 per bar is the most
+/// common count (eval/meter_group.py, REPORT.md 1.4).
+/// And the other way: bars of 3 / 6 whose music groups in 2s and 4s (score < TRIPLE_VETO) stay 4/4 (Tofu: -0.33; the catalog's
+/// 6/8 songs score +0.10 and more).
+const TRIPLE_SHARE: f64 = 0.3;
+const TRIPLE_SCORE: f64 = 0.2;
+const TRIPLE_VETO: f64 = 0.0;
+/// The 6/8 BPM is the eighth-note tempo (the tracker's "176*"); the beat tracker may follow eighths or quarters, so the octave is
+/// the one that puts the eighths in [EIGHTH_MIN, 2 * EIGHTH_MIN).
+const EIGHTH_MIN: f64 = 115.0;
+
 /// 3 or 6 when the beat tracker's most common count per bar says 6/8 (at least 30 % of bars), else None.
 fn compound_meter(beats: &[f64], down: Option<&[f64]>) -> Option<usize> {
     let down = down?;
@@ -102,6 +114,105 @@ fn compound_meter(beats: &[f64], down: Option<&[f64]>) -> Option<usize> {
         return None; // bar after bar of 3: a waltz (3/4), not the messy bars of 6/8 (engine.WALTZ_MIN_SHARE)
     }
     ((m == 3 || m == 6) && share >= 0.3).then_some(m as usize)
+}
+
+/// Lags (in beats) of the grouping features.
+pub const GROUP_LAGS: [usize; 6] = [2, 3, 4, 6, 8, 12];
+
+/// How the music groups the beat tracker's beats (eval/meter_group.py): the autocorrelation, at lags of GROUP_LAGS beats, of the
+/// onset strength and of the low-band (< 150 Hz, kick and bass) onsets at each beat. A song in 6/8 repeats every 3 or 6 beats
+/// even when the tracker's bar lines wander (Are We Still Friends: 4 per bar in half its bars); a 4/4 song every 4 and 8.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Grouping {
+    pub on: [f64; 6],
+    pub bass: [f64; 6],
+    /// share of the tracker's bars with 3 or 6 beats
+    pub share36: f64,
+}
+
+impl Grouping {
+    fn at(v: &[f64; 6], lag: usize) -> f64 {
+        v[GROUP_LAGS.iter().position(|&l| l == lag).unwrap()]
+    }
+    /// > 0: the onsets repeat more every 3 / 6 beats than every 4 / 8
+    pub fn triple_on(&self) -> f64 {
+        Self::at(&self.on, 3).max(Self::at(&self.on, 6)) - Self::at(&self.on, 4).max(Self::at(&self.on, 8))
+    }
+    pub fn triple_bass(&self) -> f64 {
+        Self::at(&self.bass, 3).max(Self::at(&self.bass, 6)).max(Self::at(&self.bass, 12)) - Self::at(&self.bass, 4).max(Self::at(&self.bass, 8))
+    }
+}
+
+/// Spectral magnitudes of the centred frames around each beat only (4 short FFTs per beat: cheap on a whole song).
+pub fn beat_grouping(y: &[f32], sr: f64, beats: &[f64], down: Option<&[f64]>) -> Option<Grouping> {
+    use realfft::RealFftPlanner;
+    if beats.len() < 32 || sr <= 0.0 {
+        return None;
+    }
+    let n_fft = ((2048.0 * sr / 22050.0).round() as usize).next_power_of_two();
+    let hop = ((128.0 * sr / 22050.0).round() as usize).max(1);
+    let win = crate::dsp::hann_periodic(n_fft);
+    let fft = RealFftPlanner::<f32>::new().plan_fft_forward(n_fft);
+    let n_bins = n_fft / 2 + 1;
+    let low = ((150.0 * n_fft as f64 / sr).ceil() as usize).min(n_bins); // bins below 150 Hz
+    let mag = |f: i64| -> Vec<f32> {
+        let mut buf = vec![0f32; n_fft];
+        let start = f * hop as i64 - (n_fft / 2) as i64;
+        for (i, b) in buf.iter_mut().enumerate() {
+            let j = start + i as i64;
+            if j >= 0 && (j as usize) < y.len() {
+                *b = y[j as usize] * win[i];
+            }
+        }
+        let mut out = fft.make_output_vec();
+        fft.process(&mut buf, &mut out).unwrap();
+        out.iter().map(|c| c.norm()).collect()
+    };
+    let n_frames = (y.len() / hop) as i64;
+    let centres: Vec<i64> = beats.iter().map(|t| (t * sr / hop as f64).round() as i64).filter(|&f| f >= 3 && f + 2 < n_frames).collect();
+    if centres.len() < 32 {
+        return None;
+    }
+    // frames f-2 ..= f+1 around each beat: onset at f-1, f, f+1 (each against its previous frame)
+    let frames: Vec<Vec<Vec<f32>>> = centres.iter().map(|&c| (c - 2..=c + 1).map(&mag).collect()).collect();
+    let gmax = frames.iter().flatten().flatten().cloned().fold(0f32, f32::max).max(1e-10);
+    let floor = gmax * 1e-4; // librosa.amplitude_to_db(ref=max, top_db=80)
+    let db = |m: &[f32]| -> Vec<f32> { m.iter().map(|&v| 20.0 * v.max(floor).log10()).collect() };
+    let mut on = Vec::with_capacity(centres.len());
+    let mut bass = Vec::with_capacity(centres.len());
+    for fr in &frames {
+        let d: Vec<Vec<f32>> = fr.iter().map(|m| db(m)).collect();
+        let lows: Vec<f64> = fr.iter().map(|m| (m[..low].iter().map(|&v| v as f64).sum::<f64>()).ln_1p()).collect();
+        let mut o = 0f64;
+        let mut b = 0f64;
+        for k in 1..4 {
+            let flux = d[k].iter().zip(&d[k - 1]).map(|(a, p)| (a - p).max(0.0) as f64).sum::<f64>() / n_bins as f64;
+            o = o.max(flux);
+            b = b.max((lows[k] - lows[k - 1]).max(0.0));
+        }
+        on.push(o);
+        bass.push(b);
+    }
+    let ac = |x: &[f64]| -> [f64; 6] {
+        let m = x.iter().sum::<f64>() / x.len() as f64;
+        let sd = (x.iter().map(|v| (v - m) * (v - m)).sum::<f64>() / x.len() as f64).sqrt() + 1e-9;
+        let z: Vec<f64> = x.iter().map(|v| (v - m) / sd).collect();
+        let mut out = [0.0; 6];
+        for (i, &l) in GROUP_LAGS.iter().enumerate() {
+            out[i] = if z.len() > l { z[..z.len() - l].iter().zip(&z[l..]).map(|(a, b)| a * b).sum::<f64>() / (z.len() - l) as f64 } else { 0.0 };
+        }
+        out
+    };
+    let share36 = match down {
+        Some(d) if d.len() >= 6 => {
+            let tol = 0.3 * median(&diff(beats));
+            let idx: Vec<i64> = d.iter().map(|x| np::searchsorted(beats, x - tol) as i64).collect();
+            let counts: Vec<i64> = idx.windows(2).map(|w| w[1] - w[0]).collect();
+            counts.iter().filter(|&&c| c == 3 || c == 6).count() as f64 / counts.len().max(1) as f64
+        }
+        _ => 0.0,
+    };
+    Some(Grouping { on: ac(&on), bass: ac(&bass), share36 })
 }
 
 /// Beat period from a robust straight-line fit of beat time against beat index (trims outliers twice).
@@ -315,7 +426,17 @@ pub fn analyze(y: &[f32], sr: f64, raw: &[f64], down_raw: &[f64], signature: &st
     let mut sig = if sig_auto { bf::infer_signature(&raw, down).map(|g| g.0).unwrap_or("4/4") } else { signature };
     // 6/8 (engine.compound_meter in the service): 3 per bar = eighths in dotted-quarter groups, cleaned as 3/4 and reported as
     // 6/8 below; 6 per bar = a whole 6/8 bar
-    let compound = if sig_auto { compound_meter(&raw, down) } else { None };
+    let mut compound = if sig_auto { compound_meter(&raw, down) } else { None };
+    if sig_auto {
+        if let Some(g) = beat_grouping(y, sr, &raw, down) {
+            let score = g.triple_on() + g.triple_bass();
+            if compound.is_some() && score < TRIPLE_VETO {
+                compound = None;
+            } else if compound.is_none() && sig != "3/4" && g.share36 >= TRIPLE_SHARE && score >= TRIPLE_SCORE {
+                compound = Some(3);
+            }
+        }
+    }
     match compound {
         Some(3) => sig = "3/4",
         Some(6) => sig = "6/8",
@@ -398,10 +519,25 @@ pub fn analyze(y: &[f32], sr: f64, raw: &[f64], down_raw: &[f64], signature: &st
         }
     }
     let step = (iv.len() / 1500).max(1);
-    let sig_conf = if sig_auto { signature_confidence(&raw, down, sig) } else { Some(1.0) };
+    let sig_conf = if !sig_auto {
+        Some(1.0)
+    } else if compound.is_some() {
+        // 6/8: a tracker bar of 3 (a dotted-quarter group) or 6 (a whole bar) both agree
+        signature_confidence(&raw, down, "3/4").zip(signature_confidence(&raw, down, "6/8")).map(|(a, b)| py_round(a + b, 3))
+    } else {
+        signature_confidence(&raw, down, sig)
+    };
     // 3 eighths per tracker bar: the felt 6/8 beat (a dotted quarter) is three of the tracker's beats; BPM Fixer's cleaning may
     // have moved the grid to another octave, so the factor is measured
-    let f = if compound.is_some() { 3.0 * (median(&diff(&raw)) / median(&iv)).log2().round_ties_even().exp2() } else { 1.0 };
+    let mut f = if compound.is_some() { 3.0 * (median(&diff(&raw)) / median(&iv)).log2().round_ties_even().exp2() } else { 1.0 };
+    if compound.is_some() && main.bpm > 0.0 {
+        while 3.0 * main.bpm / f < EIGHTH_MIN {
+            f /= 2.0;
+        }
+        while 3.0 * main.bpm / f >= 2.0 * EIGHTH_MIN {
+            f *= 2.0;
+        }
+    }
     let mut sections = sections;
     let mut main = main;
     if f != 1.0 {

@@ -7,7 +7,7 @@
 
 **Drop in a song. Get its key, BPM, chords, detune and borrowed chords, written the way the SongSpec tracker writes them.**
 
-![version](https://img.shields.io/badge/version-1.3.0-13265c?style=flat-square)
+![version](https://img.shields.io/badge/version-1.4.0-13265c?style=flat-square)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-13265c?style=flat-square)
 ![desktop](https://img.shields.io/badge/desktop-Windows%20.exe-13265c?style=flat-square)
 ![web](https://img.shields.io/badge/web-HTTP%20API%20%2B%20JS%20client-13265c?style=flat-square)
@@ -31,9 +31,9 @@
 
 | | |
 |---|---|
-| **Key** | Key in tracker style (`Eb Minor`, `Db Major`, `Bb Minor*` with `A# Phrygian` for a mode), confidence, alternates, Camelot / Open Key, and key changes inside a song. |
+| **Key** | Key in tracker style (`Eb Minor`, `Db Major`, `Bb Minor*` with `A# Phrygian` for a mode), confidence, alternates, Camelot / Open Key, and key changes inside a song. The app names Phrygian, Locrian and Phrygian Dominant songs by their mode (`G Phrygian Dominant`), from the chords and the key estimators together. |
 | **May borrow from** | Which scales the song's chords borrow from, for example `May borrow from C Mixolydian, C Minor`. Covers every mode, harmonic / melodic minor, and minor keys borrowing from their major. |
-| **BPM** | The exact tempo to three decimals (`134.759`) with the tracker's rounded reading (80–160, `~` for live, `153 / 104` for beat switches), half / double values and the time signature (6/8 songs get their eighth-note tempo, like the tracker's `176*`). Uses BPM Fixer's engine. |
+| **BPM** | The exact tempo to three decimals (`134.759`) with the tracker's rounded reading (80–160, `~` for live, `153 / 104` for beat switches), half / double values and the time signature (6/8 songs get their eighth-note tempo, like the tracker's `176*`; the app also hears 6/8 when the beat tracker's bar lines wander, from how the kick and the onsets repeat every 3 beats). Uses BPM Fixer's engine. |
 | **Detune** | Cents off A440 and the A4 frequency (`−18.5 ¢`, `A4 = 435.32 Hz`), plus drift. Uses Centsible's engine. |
 | **Chords** | Chords on the beat grid, with roman numerals (`i–VI–III–VII ×8`), on a timeline you can play along to (click track, hear it at A440, transpose), plus MIDI / ChordPro export. |
 | **What voted** | Every key estimator's answer, for when you want to know *why*. |
@@ -93,7 +93,7 @@ Measured on held-out songs from the SongSpec tracker; the full details are in **
 | **Detune** | 0.27 ¢ average error on exactly shifted real music; 100 % within 2 ¢ |
 | **Key** | Right or a closely related key (MIREX score 0.60) on artists it never saw, with the most common error being the relative major / minor |
 | **May borrow from** | Names one of the tracker's scales on 46 % of the songs where the tracker names one |
-| **Desktop app vs the website** | Identical key, signature and detune on 20 / 20 test songs; BPM on 19 / 20 (one song is 0.1 BPM off) |
+| **Desktop app vs the website** | Identical key, signature and detune on 20 / 20 test songs; BPM on 19 / 20 (one song is 0.1 BPM off). Since 1.4 the app also names modes and finds more 6/8 songs; the website doesn't yet |
 
 ---
 

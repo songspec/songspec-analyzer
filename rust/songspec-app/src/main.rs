@@ -58,13 +58,19 @@ struct Shared {
     /// links still being read (albums / playlists are expanded into songs first) and the errors they gave
     reading_links: usize,
     link_errors: Vec<String>,
+    /// bumped by "Clear": work handed out before it (an analysis under way, links still being read) is dropped when it ends
+    gen: u64,
 }
 
-/// Add a song to the queue and hand it to the worker.
-fn enqueue(shared: &Arc<Mutex<Shared>>, tx: &Sender<usize>, song: Song) {
+/// Add a song to the queue and hand it to the worker. `gen`: the queue it was meant for (None: the current one); a song
+/// from links read before the queue was cleared is dropped.
+fn enqueue(shared: &Arc<Mutex<Shared>>, tx: &Sender<(u64, usize)>, song: Song, gen: Option<u64>) {
     let mut g = shared.lock().unwrap();
+    if gen.is_some_and(|q| q != g.gen) {
+        return;
+    }
     g.songs.push(song);
-    let _ = tx.send(g.songs.len() - 1);
+    let _ = tx.send((g.gen, g.songs.len() - 1));
 }
 
 #[derive(Clone, PartialEq)]
@@ -82,7 +88,7 @@ struct AddDialog {
 
 struct App {
     shared: Arc<Mutex<Shared>>,
-    tx: Sender<usize>,
+    tx: Sender<(u64, usize)>,
     selected: Option<usize>,
     player: Option<player::Player>,
     play_error: Option<String>,
@@ -102,12 +108,14 @@ struct App {
     /// developer flag --screenshot PATH: once every queued song is done, save the window to PATH and quit
     screenshot: Option<PathBuf>,
     shot_requested: bool,
+    /// "Clear" was clicked once: ask before throwing the results away
+    confirm_clear: bool,
 }
 
-fn worker(shared: Arc<Mutex<Shared>>, rx: std::sync::mpsc::Receiver<usize>, ctx: egui::Context) {
+fn worker(shared: Arc<Mutex<Shared>>, rx: std::sync::mpsc::Receiver<(u64, usize)>, ctx: egui::Context) {
     let mut engine: Option<Engine> = None;
     loop {
-        let idx = match rx.try_recv() {
+        let (gen, idx) = match rx.try_recv() {
             Ok(i) => i,
             Err(_) => {
                 if let Some(e) = engine.as_ref() {
@@ -119,17 +127,25 @@ fn worker(shared: Arc<Mutex<Shared>>, rx: std::sync::mpsc::Receiver<usize>, ctx:
                 }
             }
         };
+        // the queue was cleared since this song was queued: its index now means nothing
+        let live = |g: &Shared| g.gen == gen && idx < g.songs.len();
         let set = |s: Status| {
-            shared.lock().unwrap().songs[idx].status = s;
+            let mut g = shared.lock().unwrap();
+            if live(&g) {
+                g.songs[idx].status = s;
+            }
             ctx.request_repaint();
         };
         let (source, cache) = {
             let g = shared.lock().unwrap();
+            if !live(&g) {
+                continue;
+            }
             (g.songs[idx].source.clone(), g.cache.clone())
         };
         let mut meta: Option<fetch::Track> = None;
         if !matches!(source, Source::File) {
-            match fetch_audio(&source, &cache, &set, &shared, idx) {
+            match fetch_audio(&source, &cache, &set, &shared, gen, idx) {
                 Ok(t) => meta = t,
                 Err(e) => {
                     set(Status::Failed(e));
@@ -137,7 +153,13 @@ fn worker(shared: Arc<Mutex<Shared>>, rx: std::sync::mpsc::Receiver<usize>, ctx:
                 }
             }
         }
-        let path = shared.lock().unwrap().songs[idx].path.clone().unwrap();
+        let path = {
+            let g = shared.lock().unwrap();
+            match g.songs.get(idx).filter(|_| live(&g)).and_then(|s| s.path.clone()) {
+                Some(p) => p,
+                None => continue,
+            }
+        };
         set(Status::Running("Reading the file..."));
         let audio = match songspec_core::audio::decode_file(&path) {
             Ok(a) => a,
@@ -151,6 +173,9 @@ fn worker(shared: Arc<Mutex<Shared>>, rx: std::sync::mpsc::Receiver<usize>, ctx:
         let r = eng.analyze(&audio, &Options::default(), &progress);
         drop(audio); // the decoded samples are freed as soon as the analysis is done
         let mut g = shared.lock().unwrap();
+        if !live(&g) {
+            continue;
+        }
         match r {
             Ok(mut a) => {
                 if let Some(m) = meta {
@@ -168,7 +193,7 @@ fn worker(shared: Arc<Mutex<Shared>>, rx: std::sync::mpsc::Receiver<usize>, ctx:
 }
 
 /// A song from a link -> its audio file in the cache (song.path set), and the streaming service's title / artist when known.
-fn fetch_audio(source: &Source, cache: &Path, set: &dyn Fn(Status), shared: &Arc<Mutex<Shared>>, idx: usize) -> Result<Option<fetch::Track>, String> {
+fn fetch_audio(source: &Source, cache: &Path, set: &dyn Fn(Status), shared: &Arc<Mutex<Shared>>, gen: u64, idx: usize) -> Result<Option<fetch::Track>, String> {
     let exe = fetch::ytdlp().ok_or("yt-dlp isn't installed (Add songs → Get yt-dlp).")?;
     let (url, mut meta) = match source {
         Source::Song(t) => {
@@ -181,6 +206,10 @@ fn fetch_audio(source: &Source, cache: &Path, set: &dyn Fn(Status), shared: &Arc
     set(Status::Running("Downloading the audio..."));
     let (path, title) = fetch::download(&exe, &url, cache)?;
     let mut g = shared.lock().unwrap();
+    if g.gen != gen || idx >= g.songs.len() {
+        let _ = std::fs::remove_file(&path); // cleared while downloading
+        return Err("cleared".into());
+    }
     if meta.is_none() {
         g.songs[idx].name = title.clone();
         meta = Some(fetch::Track { title, artist: None, duration: None });
@@ -193,7 +222,7 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         install_fonts(&cc.egui_ctx);
         cc.egui_ctx.set_theme(egui::ThemePreference::Dark); // the website's dark look, whatever the system theme (its colours are built for a dark background)
-        let shared = Arc::new(Mutex::new(Shared { songs: vec![], cache: fetch::session_cache(), reading_links: 0, link_errors: vec![] }));
+        let shared = Arc::new(Mutex::new(Shared { songs: vec![], cache: fetch::session_cache(), reading_links: 0, link_errors: vec![], gen: 0 }));
         let (tx, rx) = channel();
         let s2 = shared.clone();
         let ctx = cc.egui_ctx.clone();
@@ -204,6 +233,7 @@ impl App {
         let mut app = App {
             shared, tx, selected: None, player: None, play_error: None, add: None, ytdlp, transpose: 0, simple: false,
             tl_view_w: 800.0, tl_off: 0.0, tl_follow: true, volume: 1.0, muted_from: 1.0, flash: None, screenshot, shot_requested: false,
+            confirm_clear: false,
         };
         // files and links given on the command line (or dropped onto the .exe) start in the queue
         let files: Vec<PathBuf> = raw.iter().map(PathBuf::from).filter(|p| p.is_file() && Some(p) != app.screenshot.as_ref()).collect();
@@ -214,7 +244,7 @@ impl App {
     }
 
     fn push(&mut self, song: Song) {
-        enqueue(&self.shared, &self.tx, song);
+        enqueue(&self.shared, &self.tx, song, None);
     }
 
     fn add_files(&mut self, files: Vec<PathBuf>) {
@@ -233,7 +263,11 @@ impl App {
         if links.is_empty() {
             return;
         }
-        self.shared.lock().unwrap().reading_links += links.len();
+        let gen = {
+            let mut g = self.shared.lock().unwrap();
+            g.reading_links += links.len();
+            g.gen
+        };
         let (shared, tx, links) = (self.shared.clone(), self.tx.clone(), links.to_vec());
         std::thread::spawn(move || {
             let exe = fetch::ytdlp();
@@ -246,18 +280,47 @@ impl App {
                                 fetch::Item::Song(t) => (Source::Song(t.clone()), t.label()),
                                 fetch::Item::Video(u) => (Source::Video(u.clone()), u),
                             };
-                            enqueue(&shared, &tx, Song { source, path: None, name, status: Status::Queued, result: None });
+                            enqueue(&shared, &tx, Song { source, path: None, name, status: Status::Queued, result: None }, Some(gen));
                         }
                     }
-                    Err(e) => shared.lock().unwrap().link_errors.push(e),
+                    Err(e) => {
+                        let mut g = shared.lock().unwrap();
+                        if g.gen == gen {
+                            g.link_errors.push(e);
+                        }
+                    }
                 }
-                shared.lock().unwrap().reading_links -= 1;
+                let mut g = shared.lock().unwrap();
+                if g.gen != gen {
+                    return; // cleared: the rest of these links aren't wanted any more
+                }
+                g.reading_links -= 1;
             }
         });
     }
 
     fn stop(&mut self) {
         self.player = None;
+    }
+
+    /// Empty the queue: results, songs waiting, links still being read. A song being analysed right now finishes in the
+    /// background and is thrown away. Downloaded audio of the cleared songs is deleted (your own files are never touched).
+    fn clear_queue(&mut self) {
+        self.player = None;
+        self.play_error = None;
+        self.selected = None;
+        let mut g = self.shared.lock().unwrap();
+        g.gen += 1;
+        let cache = g.cache.clone();
+        for s in g.songs.drain(..) {
+            if let (false, Some(p)) = (matches!(s.source, Source::File), s.path) {
+                if p.starts_with(&cache) {
+                    let _ = std::fs::remove_file(p);
+                }
+            }
+        }
+        g.reading_links = 0;
+        g.link_errors.clear();
     }
 }
 
@@ -277,6 +340,15 @@ fn install_fonts(ctx: &egui::Context) {
         }
     }
     ctx.set_fonts(fonts);
+}
+
+/// The key as a musician reads it: the mode by name when the song is modal ("G Phrygian Dominant"), else the tracker's key field.
+fn key_name(k: &songspec_core::key::Key) -> String {
+    if k.mode.is_some() && k.sections.is_empty() {
+        songspec_core::notation::mode_name(k.tonic_pc, &k.mode_id)
+    } else {
+        k.display.key.clone()
+    }
 }
 
 fn fmt_t(t: f64) -> String {
@@ -380,7 +452,26 @@ impl eframe::App for App {
 
         egui::SidePanel::left("queue").resizable(true).default_width(290.0).show(ctx, |ui| {
             ui.add_space(4.0);
-            ui.label(RichText::new(format!("Queue ({})", snapshot.len())).strong());
+            let busy = reading > 0 || !snapshot.is_empty();
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(format!("Queue ({})", snapshot.len())).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if self.confirm_clear && busy {
+                        if ui.button(RichText::new("Cancel").small()).clicked() {
+                            self.confirm_clear = false;
+                        }
+                        if ui.add(egui::Button::new(RichText::new("Clear all").small().color(Color32::WHITE)).fill(BAD)).clicked() {
+                            self.clear_queue();
+                            self.confirm_clear = false;
+                        }
+                    } else {
+                        self.confirm_clear = false;
+                        if ui.add_enabled(busy, egui::Button::new(RichText::new("🗑 Clear").small())).on_hover_text("Remove every song from the queue").clicked() {
+                            self.confirm_clear = true;
+                        }
+                    }
+                });
+            });
             if reading > 0 {
                 ui.horizontal(|ui| {
                     ui.spinner();
@@ -400,7 +491,7 @@ impl eframe::App for App {
                         Status::Failed(e) => format!("failed: {e}"),
                         Status::Done => res
                             .as_ref()
-                            .map(|a| format!("{} · {} BPM", a.key.as_ref().map(|k| k.display.key.clone()).unwrap_or("no key".into()), a.tempo.as_ref().and_then(|t| t.bpm_exact).map(|b| format!("{b:.3}")).unwrap_or("–".into())))
+                            .map(|a| format!("{} · {} BPM", a.key.as_ref().map(key_name).unwrap_or("no key".into()), a.tempo.as_ref().and_then(|t| t.bpm_exact).map(|b| format!("{b:.3}")).unwrap_or("–".into())))
                             .unwrap_or_default(),
                     };
                     if ui.add(egui::Button::selectable(sel, RichText::new(name).strong()).wrap_mode(egui::TextWrapMode::Truncate)).clicked() {
@@ -490,15 +581,24 @@ impl App {
         };
         let key = |ui: &mut egui::Ui| match a.and_then(|a| a.key.as_ref()) {
             Some(k) => {
-                value(ui, &k.display.key);
-                if let Some(n) = &k.display.note {
+                let name = key_name(k);
+                value(ui, &name);
+                if name != k.display.key {
+                    // modal: the tracker writes the mode under its parent with a star; the note repeats the mode's name first
+                    sub(ui, &format!("tracker: {}", k.display.key));
+                    if let Some(rest) = k.display.note.as_deref().and_then(|n| n.split_once(" - ")).map(|x| x.1) {
+                        sub(ui, rest);
+                    }
+                } else if let Some(n) = &k.display.note {
                     sub(ui, n);
                 }
                 sub(ui, &format!("{} · {} · {:.0} %", k.camelot, k.open_key, 100.0 * k.confidence));
                 if let Some(t) = &k.display.ambiguity_text {
                     sub(ui, t);
                 }
-                chips(ui, &k.candidates.iter().enumerate().map(|(i, c)| (format!("{} {:.0} %", c.key, 100.0 * c.p), i == 0)).collect::<Vec<_>>());
+                // the key profiles' candidates; the one the shown key agrees with is marked (none when the chords moved the tonic)
+                let shown = k.display.key.trim_end_matches('*');
+                chips(ui, &k.candidates.iter().map(|c| (format!("{} {:.0} %", c.key, 100.0 * c.p), c.key == shown)).collect::<Vec<_>>());
                 if !k.borrows.is_empty() {
                     details(ui, "borrowed", "borrowed chords", &k.borrows.iter().map(|b| format!("{} → {}", b.chords.join(", "), b.from)).collect::<Vec<_>>());
                 }
@@ -732,7 +832,7 @@ impl App {
                 if let Some(k) = &a.key {
                     lane(58.0, "key");
                     let secs: Vec<(f64, f64, String)> = if k.sections.is_empty() {
-                        vec![(0.0, dur, k.display.key.clone())]
+                        vec![(0.0, dur, key_name(k))]
                     } else {
                         k.sections.iter().map(|s| (s.start, s.end, s.display.clone())).collect()
                     };

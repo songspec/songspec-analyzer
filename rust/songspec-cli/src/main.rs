@@ -89,6 +89,29 @@ fn main() {
         println!("{}", v);
         return;
     }
+    if args.first().map(|s| s.as_str()) == Some("--meter") {
+        // --meter FILE...: the beat tracker's beats per bar and the beat-grouping features (eval/meter_group.py --rust)
+        let models = songspec_core::models::ModelBytes::embedded();
+        let cache = songspec_core::models::PlanCache::default();
+        for f in &args[1..] {
+            let a = match songspec_core::audio::decode_file(Path::new(f)) {
+                Ok(a) => a,
+                Err(e) => {
+                    println!("{}", serde_json::json!({"file": f, "error": e.to_string()}));
+                    continue;
+                }
+            };
+            let mono = a.mono();
+            let (b, d) = songspec_core::beatthis::detect(&mono, a.sr, &models, &cache).unwrap();
+            let g = songspec_core::tempo::beat_grouping(&mono, a.sr as f64, &b, Some(&d));
+            let tol = 0.3 * songspec_core::np::median(&songspec_core::np::diff(&b));
+            let idx: Vec<i64> = d.iter().map(|x| songspec_core::np::searchsorted(&b, x - tol) as i64).collect();
+            let counts: Vec<i64> = idx.windows(2).map(|w| w[1] - w[0]).collect();
+            println!("{}", serde_json::json!({"file": f, "grouping": g, "per_bar": counts,
+                "period": songspec_core::np::median(&songspec_core::np::diff(&b))}));
+        }
+        return;
+    }
     if args.first().map(|s| s.as_str()) == Some("--beats") {
         let models = songspec_core::models::ModelBytes::embedded();
         let cache = songspec_core::models::PlanCache::default();
