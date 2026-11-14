@@ -17,7 +17,9 @@ pub struct Player {
     pub click_on: bool,
     pub retune_on: bool,
     retune_rate: f32,
+    /// the song's and the click track's own volumes (0..1, slider positions)
     volume: f32,
+    click_volume: f32,
 }
 
 const CLICK_SR: u32 = 22050;
@@ -44,6 +46,7 @@ impl Player {
             retune_on: false,
             retune_rate: detune_cents.map(|c| 2f64.powf(-c / 1200.0) as f32).unwrap_or(1.0),
             volume: 1.0,
+            click_volume: 1.0,
         })
     }
 
@@ -107,7 +110,7 @@ impl Player {
             let c = rodio::Player::connect_new(&self.mixer);
             c.append(self.click_buffer());
             c.set_speed(self.song.speed());
-            c.set_volume(self.gain());
+            c.set_volume(gain(self.click_volume));
             let _ = c.try_seek(Duration::from_secs_f64(self.pos()));
             if self.song.is_paused() {
                 c.pause();
@@ -120,17 +123,18 @@ impl Player {
         }
     }
 
-    /// 0 = silent, 1 = the file's own level. Slider position is squared so the low end isn't all "barely audible".
+    /// The song's volume: 0 = silent, 1 = the file's own level.
     pub fn set_volume(&mut self, v: f32) {
         self.volume = v.clamp(0.0, 1.0);
-        self.song.set_volume(self.gain());
-        if let Some(c) = &self.clicks {
-            c.set_volume(self.gain());
-        }
+        self.song.set_volume(gain(self.volume));
     }
 
-    fn gain(&self) -> f32 {
-        self.volume * self.volume
+    /// The click track's volume, apart from the song's.
+    pub fn set_click_volume(&mut self, v: f32) {
+        self.click_volume = v.clamp(0.0, 1.0);
+        if let Some(c) = &self.clicks {
+            c.set_volume(gain(self.click_volume));
+        }
     }
 
     pub fn set_retune(&mut self, on: bool) {
@@ -141,6 +145,11 @@ impl Player {
             c.set_speed(r);
         }
     }
+}
+
+/// Slider position -> gain, squared so the low end of the slider isn't all "barely audible".
+fn gain(v: f32) -> f32 {
+    v * v
 }
 
 impl Drop for Player {

@@ -4,6 +4,7 @@
 //! Key / BPM / Detune / Time signature tiles, the player with the chord / beat / key / tempo / detune timeline, and the exports.
 //! Memory: the engine drops its compiled networks whenever the queue runs empty; playback streams from the file.
 
+mod daw;
 mod exports;
 mod fetch;
 mod player;
@@ -101,15 +102,20 @@ struct App {
     /// back on once the playhead is in view again: otherwise following and your scrolling fight every frame)
     tl_off: f32,
     tl_follow: bool,
-    /// playback volume (0..1), kept when switching songs
+    /// playback volumes (0..1) of the song and of the click track, kept when switching songs
     volume: f32,
     muted_from: f32,
+    click_volume: f32,
     flash: Option<(String, Instant)>,
     /// developer flag --screenshot PATH: once every queued song is done, save the window to PATH and quit
     screenshot: Option<PathBuf>,
     shot_requested: bool,
     /// "Clear" was clicked once: ask before throwing the results away
     confirm_clear: bool,
+    /// "Drag into your DAW": the WAVs being made for downloaded songs, the last file handed out, what the last drag did
+    daw_prep: std::collections::HashMap<PathBuf, Arc<Mutex<daw::Prep>>>,
+    daw_last: Option<PathBuf>,
+    daw_msg: Arc<Mutex<Option<(String, bool)>>>,
 }
 
 fn worker(shared: Arc<Mutex<Shared>>, rx: std::sync::mpsc::Receiver<(u64, usize)>, ctx: egui::Context) {
@@ -232,8 +238,11 @@ impl App {
         let ytdlp = Arc::new(Mutex::new(if fetch::ytdlp().is_some() { Ytdlp::Ready } else { Ytdlp::Missing }));
         let mut app = App {
             shared, tx, selected: None, player: None, play_error: None, add: None, ytdlp, transpose: 0, simple: false,
-            tl_view_w: 800.0, tl_off: 0.0, tl_follow: true, volume: 1.0, muted_from: 1.0, flash: None, screenshot, shot_requested: false,
+            tl_view_w: 800.0, tl_off: 0.0, tl_follow: true, volume: 1.0, muted_from: 1.0, click_volume: 0.8, flash: None, screenshot, shot_requested: false,
             confirm_clear: false,
+            daw_prep: Default::default(),
+            daw_last: None,
+            daw_msg: Arc::new(Mutex::new(None)),
         };
         // files and links given on the command line (or dropped onto the .exe) start in the queue
         let files: Vec<PathBuf> = raw.iter().map(PathBuf::from).filter(|p| p.is_file() && Some(p) != app.screenshot.as_ref()).collect();
@@ -321,6 +330,10 @@ impl App {
         }
         g.reading_links = 0;
         g.link_errors.clear();
+        let _ = std::fs::remove_dir_all(cache.join("daw")); // the WAVs made for dragging (copies already in Music stay)
+        drop(g);
+        self.daw_prep.clear();
+        *self.daw_msg.lock().unwrap() = None;
     }
 }
 
@@ -418,7 +431,7 @@ fn details(ui: &mut egui::Ui, id: &str, title: &str, lines: &[String]) {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
         if !dropped.is_empty() {
             self.add_files(dropped);
@@ -495,6 +508,9 @@ impl eframe::App for App {
                             .unwrap_or_default(),
                     };
                     if ui.add(egui::Button::selectable(sel, RichText::new(name).strong()).wrap_mode(egui::TextWrapMode::Truncate)).clicked() {
+                        if self.selected != Some(i) {
+                            *self.daw_msg.lock().unwrap() = None;
+                        }
                         self.selected = Some(i);
                     }
                     ui.horizontal(|ui| {
@@ -512,6 +528,14 @@ impl eframe::App for App {
                 }
             });
         });
+
+        // the selected song, once analysed, can be dragged out of the window into a DAW
+        if let Some(i) = self.selected.filter(|&i| i < snapshot.len()) {
+            if let (Status::Done, Some(a), Some(p)) = (&snapshot[i].1, &snapshot[i].2, &snapshot[i].3) {
+                let (name, a, p) = (snapshot[i].0.clone(), a.clone(), p.clone());
+                egui::TopBottomPanel::bottom("daw").show(ctx, |ui| self.daw_box(ui, frame, &name, &a, &p));
+            }
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             if hovering {
@@ -734,20 +758,6 @@ impl App {
                     p.set_retune(!ret_on);
                 }
             }
-            // volume: click the speaker to mute / unmute
-            let icon = if self.volume <= 0.001 { "🔇" } else if self.volume < 0.5 { "🔉" } else { "🔊" };
-            if ui.add(egui::Button::new(icon).frame(false)).on_hover_text("Mute / unmute").clicked() {
-                self.volume = if self.volume <= 0.001 { self.muted_from.max(0.1) } else { self.muted_from = self.volume; 0.0 };
-                if let Some(p) = self.player.as_mut() {
-                    p.set_volume(self.volume);
-                }
-            }
-            let r = ui.add(egui::Slider::new(&mut self.volume, 0.0..=1.0).show_value(false)).on_hover_text(format!("Volume {:.0} %", 100.0 * self.volume));
-            if r.changed() {
-                if let Some(p) = self.player.as_mut() {
-                    p.set_volume(self.volume);
-                }
-            }
             ui.add_space(8.0);
             ui.label(RichText::new("transpose chords").size(13.0).color(MUTED));
             egui::ComboBox::from_id_salt("tr").width(56.0).selected_text(if self.transpose > 0 { format!("+{}", self.transpose) } else { self.transpose.to_string() }).show_ui(ui, |ui| {
@@ -760,6 +770,102 @@ impl App {
                 ui.colored_label(BAD, e);
             }
         });
+        // volumes: the song and the click track each have their own
+        ui.horizontal(|ui| {
+            ui.spacing_mut().slider_width = 120.0;
+            ui.label(RichText::new("Song").size(13.0).color(MUTED));
+            let icon = if self.volume <= 0.001 { "🔇" } else if self.volume < 0.5 { "🔉" } else { "🔊" };
+            if ui.add(egui::Button::new(icon).frame(false)).on_hover_text("Mute / unmute the song").clicked() {
+                self.volume = if self.volume <= 0.001 { self.muted_from.max(0.1) } else { self.muted_from = self.volume; 0.0 };
+                if let Some(p) = self.player.as_mut() {
+                    p.set_volume(self.volume);
+                }
+            }
+            let r = ui.add(egui::Slider::new(&mut self.volume, 0.0..=1.0).show_value(false)).on_hover_text(format!("Song volume {:.0} %", 100.0 * self.volume));
+            if r.changed() {
+                if let Some(p) = self.player.as_mut() {
+                    p.set_volume(self.volume);
+                }
+            }
+            ui.add_space(16.0);
+            ui.label(RichText::new("Click").size(13.0).color(MUTED));
+            let r = ui.add(egui::Slider::new(&mut self.click_volume, 0.0..=1.0).show_value(false)).on_hover_text(format!("Click track volume {:.0} %", 100.0 * self.click_volume));
+            if r.changed() {
+                if let Some(p) = self.player.as_mut() {
+                    p.set_click_volume(self.click_volume);
+                }
+            }
+        });
+    }
+
+    /// The box at the bottom: drag the song into a DAW (a WAV in Music/SongSpec Analyzer for a downloaded song, your own file as
+    /// it is), or show it in Explorer / the Finder.
+    fn daw_box(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame, name: &str, a: &Analysis, path: &Path) {
+        let cache = self.shared.lock().unwrap().cache.clone();
+        let prep = if path.starts_with(&cache) {
+            let st = self.daw_prep.entry(path.to_path_buf()).or_insert_with(|| daw::prepare(path.to_path_buf(), &cache, ui.ctx().clone()));
+            Some(st.lock().unwrap().clone())
+        } else {
+            None
+        };
+        let bpm = a.tempo.as_ref().and_then(|t| t.display.bpm.clone()).map(|b| b.replace(['*', '~'], ""));
+        let key = a.key.as_ref().map(|k| key_name(k).split(" / ").next().unwrap_or_default().trim_end_matches('*').to_string()); // the first section's key
+        let nice = daw::file_name(name, bpm.as_deref(), key.as_deref());
+        let (ready, prepared, title, detail) = match &prep {
+            None => (true, None, path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default(), "your file, as it is".to_string()),
+            Some(daw::Prep::Working) => (false, None, "Making a WAV for your DAW…".to_string(), String::new()),
+            Some(daw::Prep::Ready(w)) => (true, Some(w.clone()), nice.clone(), "WAV · kept in Music › SongSpec Analyzer, so your project still finds it after you close the app".to_string()),
+            Some(daw::Prep::Failed(e)) => (false, None, "Couldn't make a WAV of this song".to_string(), e.clone()),
+        };
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            let w = (ui.available_width() - 150.0).max(200.0);
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 54.0), if ready { Sense::click_and_drag() } else { Sense::hover() });
+            let hot = ready && (resp.hovered() || resp.dragged());
+            let p = ui.painter();
+            p.rect(rect, 10.0, if hot { Color32::from_rgb(0x23, 0x2a, 0x3a) } else { Color32::from_rgb(0x1e, 0x1f, 0x23) }, Stroke::new(1.0, if hot { ACCENT } else { LINE }), egui::StrokeKind::Inside);
+            let icon = if ready { "⇲" } else { "…" };
+            p.text(rect.left_center() + Vec2::new(18.0, 0.0), Align2::LEFT_CENTER, icon, FontId::proportional(22.0), if ready { ACCENT } else { MUTED });
+            let head = if ready { "Drag into your DAW" } else { "Drag into your DAW (preparing)" };
+            p.text(rect.left_top() + Vec2::new(48.0, 9.0), Align2::LEFT_TOP, head, FontId::proportional(14.0), FG);
+            let line = if detail.is_empty() { title.clone() } else { format!("{title}  ·  {detail}") };
+            let galley = p.layout(line, FontId::proportional(11.5), MUTED, rect.width() - 60.0);
+            p.galley(rect.left_top() + Vec2::new(48.0, 29.0), galley, MUTED);
+            if ready {
+                if resp.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                }
+                if resp.drag_started() {
+                    let (msg, ctx2) = (self.daw_msg.clone(), ui.ctx().clone());
+                    let r = daw::deliver(prepared.as_deref(), path, &nice).and_then(|f| {
+                        daw::start_drag(frame, &f, move |dropped| {
+                            *msg.lock().unwrap() = Some((if dropped { "Dropped".into() } else { "Drag cancelled".into() }, dropped));
+                            ctx2.request_repaint();
+                        })?;
+                        Ok(f)
+                    });
+                    match r {
+                        Ok(f) => self.daw_last = Some(f),
+                        Err(e) => *self.daw_msg.lock().unwrap() = Some((format!("Couldn't start the drag: {e}"), false)),
+                    }
+                }
+            }
+            ui.vertical(|ui| {
+                if ui.add_enabled(ready, egui::Button::new("Show in folder")).on_hover_text("Save it there (a downloaded song) and open the folder").clicked() {
+                    match daw::deliver(prepared.as_deref(), path, &nice) {
+                        Ok(f) => {
+                            daw::reveal(&f);
+                            self.daw_last = Some(f);
+                        }
+                        Err(e) => *self.daw_msg.lock().unwrap() = Some((format!("Couldn't save it: {e}"), false)),
+                    }
+                }
+                if let Some((m, ok)) = self.daw_msg.lock().unwrap().clone() {
+                    ui.label(RichText::new(m).small().color(if ok { TARGET } else { MUTED }));
+                }
+            });
+        });
+        ui.add_space(6.0);
     }
 
     fn open_player(&mut self, idx: usize, path: &Path, a: &Analysis) {
@@ -768,6 +874,7 @@ impl App {
         match player::Player::open(idx, path, a.track.duration, &beats, &downs, a.detune.as_ref().map(|d| d.cents)) {
             Ok(mut p) => {
                 p.set_volume(self.volume);
+                p.set_click_volume(self.click_volume);
                 self.player = Some(p);
                 self.play_error = None;
             }
@@ -1021,7 +1128,9 @@ impl App {
 
     fn screenshot_step(&mut self, ctx: &egui::Context, snapshot: &[(String, Status, Option<Arc<Analysis>>, Option<PathBuf>)]) {
         let Some(path) = self.screenshot.clone() else { return };
-        let all_done = !snapshot.is_empty() && snapshot.iter().all(|s| matches!(s.1, Status::Done | Status::Failed(_)));
+        let all_done = !snapshot.is_empty()
+            && snapshot.iter().all(|s| matches!(s.1, Status::Done | Status::Failed(_)))
+            && !self.daw_prep.values().any(|p| matches!(*p.lock().unwrap(), daw::Prep::Working)); // and the DAW box's WAV is made
         let size = ctx.input(|i| i.viewport().inner_rect.map(|r| r.size()).unwrap_or_default());
         if all_done && !self.shot_requested && (size.x < 10.0 || size.y < 10.0) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));

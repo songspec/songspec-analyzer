@@ -23,3 +23,7 @@ sha2 = "0.11.1"
 
 [build-dependencies]
 winresource = "0.1.34"
+
+# dragging the song out of the window into a DAW (Windows: OLE DoDragDrop; macOS: an NSDraggingSession)
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+drag = "2.1.1"
