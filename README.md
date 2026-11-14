@@ -9,14 +9,14 @@
 
 ![version](https://img.shields.io/badge/version-1.4.0-13265c?style=flat-square)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-13265c?style=flat-square)
-![desktop](https://img.shields.io/badge/desktop-Windows%20.exe-13265c?style=flat-square)
+![desktop](https://img.shields.io/badge/desktop-Windows%20%7C%20macOS-13265c?style=flat-square)
 ![web](https://img.shields.io/badge/web-HTTP%20API%20%2B%20JS%20client-13265c?style=flat-square)
 ![rust](https://img.shields.io/badge/app-Rust%20%2B%20egui-64748b?style=flat-square)
 ![python](https://img.shields.io/badge/service-Python%203.12-64748b?style=flat-square)
 
 <img src="docs/images/app.png" alt="The SongSpec Analyzer desktop app showing Bb Minor, 81.8 BPM, -18.5 cents" width="720">
 
-**[⬇ Download SongSpecAnalyzer.exe](https://github.com/songspec/songspec-analyzer/releases/latest)**
+**[⬇ Download for Windows (.exe) or Mac (.dmg, Apple Silicon)](https://github.com/songspec/songspec-analyzer/releases/latest)**
 
 </div>
 
@@ -42,9 +42,14 @@
 
 ## Three ways to use it
 
-### 1. Desktop app (Windows)
+### 1. Desktop app (Windows and Mac)
 
-One file, `SongSpecAnalyzer.exe`. Double-click it and drop songs in; nothing to install (no Python, no runtimes).
+**Windows:** one file, `SongSpecAnalyzer.exe`. Double-click it and drop songs in; nothing to install (no Python, no runtimes).
+
+**Mac (Apple Silicon, macOS 11 or later):** open the `.dmg` and drag **SongSpec Analyzer** into Applications. The app isn't
+signed with an Apple developer ID, so the first time macOS says it can't check it: open **System Settings → Privacy & Security**,
+scroll down and click **Open Anyway** (once). Intel Macs aren't supported.
+
 **Add songs** takes audio files or links: Spotify tracks, albums and playlists, Apple Music songs and albums, and YouTube videos
 and playlists. A whole album is analysed song by song. Songs are analysed one after another; click one to see its results and
 play it along the chord timeline.
@@ -53,7 +58,8 @@ Links are found on YouTube and downloaded with [yt-dlp](https://github.com/yt-dl
 official release the first time you need it (you confirm first). Downloaded audio stays in a temporary cache and is deleted when
 the app closes.
 
-Build it yourself: see **[rust/README.md](rust/README.md)**. It comes down to `cargo build --release -p songspec-app`.
+Build it yourself: see **[rust/README.md](rust/README.md)**. It comes down to `cargo build --release -p songspec-app`; the Mac
+.dmg is built by [.github/workflows/macos.yml](.github/workflows/macos.yml) (`tools/make_macos_app.sh`).
 
 ### 2. On songspec.org (HTTP service + JS client)
 

@@ -1,6 +1,6 @@
 # SongSpec Analyzer desktop app (Rust)
 
-A native Windows app: drop songs in, get key, BPM, detune, time signature, borrowed chords and chords. One portable
+A native desktop app (Windows, and macOS on Apple Silicon): drop songs in, get key, BPM, detune, time signature, borrowed chords and chords. One portable
 `SongSpecAnalyzer.exe`, with no Python, Node or installer. The neural networks are built into the exe.
 
 ```
@@ -28,6 +28,14 @@ cargo test --release -p songspec-core             # notation (shared fixture wit
 ```
 
 `cargo build --profile fast` gives the same optimised code without LTO, and it builds much faster while you develop.
+
+### macOS (Apple Silicon)
+
+The same `cargo build --release -p songspec-app` works on a Mac; `bash tools/make_macos_app.sh target/release/SongSpecAnalyzer
+VERSION dist` then wraps it in `SongSpec Analyzer.app` (icon, Info.plist, ad-hoc signature) and a drag-to-Applications `.dmg`.
+[.github/workflows/macos.yml](../.github/workflows/macos.yml) does all of it on GitHub's Apple Silicon runners: it takes the models
+from the hidden `models-1` draft release (SHA-256 checked), runs the tests, checks the CLI on a synthetic song
+(`tools/make_test_song.py`: C Major, 120 BPM, 4/4, C G Am F), packages the .dmg and attaches it to each published release.
 
 ## Checks
 
