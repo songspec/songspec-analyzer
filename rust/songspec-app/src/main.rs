@@ -235,7 +235,12 @@ impl App {
         std::thread::Builder::new().name("analysis".into()).spawn(move || worker(s2, rx, ctx)).unwrap();
         let raw: Vec<String> = std::env::args().skip(1).collect();
         let screenshot = raw.iter().position(|a| a == "--screenshot").and_then(|i| raw.get(i + 1)).map(PathBuf::from);
+        fetch::load_settings();
         let ytdlp = Arc::new(Mutex::new(if fetch::ytdlp().is_some() { Ytdlp::Ready } else { Ytdlp::Missing }));
+        // keep the installed yt-dlp current (old copies start failing on YouTube); quietly, in the background
+        std::thread::spawn(|| {
+            let _ = fetch::refresh_ytdlp(false);
+        });
         let mut app = App {
             shared, tx, selected: None, player: None, play_error: None, add: None, ytdlp, transpose: 0, simple: false,
             tl_view_w: 800.0, tl_off: 0.0, tl_follow: true, volume: 1.0, muted_from: 1.0, click_volume: 0.8, flash: None, screenshot, shot_requested: false,
@@ -362,6 +367,17 @@ fn key_name(k: &songspec_core::key::Key) -> String {
     } else {
         k.display.key.clone()
     }
+}
+
+/// The scale a chord is borrowed from, when the key's borrows list it (by name, without the bass note).
+fn borrowed_from(a: &Analysis, chord: &str) -> Option<String> {
+    let label = chord.split('/').next().unwrap_or(chord);
+    a.key.as_ref()?.borrows.iter().find(|b| b.chords.iter().any(|c| c == label)).map(|b| b.from.clone())
+}
+
+fn title_case(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
 }
 
 fn fmt_t(t: f64) -> String {
@@ -522,7 +538,8 @@ impl eframe::App for App {
                             Status::Running(_) => ACCENT,
                             _ => MUTED,
                         };
-                        ui.label(RichText::new(sub_t).small().color(c));
+                        // one line here (a failure can be long); the whole message is on the song's page and in the tooltip
+                        ui.add(egui::Label::new(RichText::new(&sub_t).small().color(c)).truncate()).on_hover_text(&sub_t);
                     });
                     ui.add_space(4.0);
                 }
@@ -646,7 +663,9 @@ impl App {
                 let alts: Vec<(String, bool)> = if t.compound {
                     t.display.alternates.iter().map(|x| (x.clone(), false)).collect()
                 } else {
-                    t.alternates_exact.iter().map(|x| (format!("{x:.3}"), false)).collect()
+                    // a "triplet feel" reading comes first when the beat tracker heard the song a triplet ratio away
+                    let tri = t.display.alternates.first().is_some_and(|s| s.contains("triplet"));
+                    t.alternates_exact.iter().enumerate().map(|(i, x)| (if i == 0 && tri { format!("{x:.3} (triplet feel)") } else { format!("{x:.3}") }, false)).collect()
                 };
                 chips(ui, &alts);
             }
@@ -661,15 +680,36 @@ impl App {
                 if d.drift_flag {
                     sub(ui, &format!("tuning moves {} ¢ over the song", d.drift_range_cents.map(|r| format!("{r:.1}")).unwrap_or_default()));
                 }
+                // a part tuned differently (pitched intro, a sample at another pitch): each part's own detune
+                if d.parts.len() > 1 {
+                    sub(ui, "tuning by part:");
+                    for q in &d.parts {
+                        sub(ui, &format!("{} – {}   {}{:.0} ¢", fmt_t(q.start), fmt_t(q.end), if q.cents >= 0.0 { "+" } else { "−" }, q.cents.abs()));
+                    }
+                }
                 details(ui, "est", "estimators", &d.estimators.iter().map(|(n, v)| format!("{n}: {}", v.map(|c| format!("{c} ¢")).unwrap_or("–".into()))).collect::<Vec<_>>());
             }
             None => none(ui, "not measurable on this file"),
         };
         let sig = |ui: &mut egui::Ui| match a.and_then(|a| a.tempo.as_ref()) {
             Some(t) => {
-                value(ui, &t.signature);
-                if let Some(sc) = t.signature_conf {
-                    sub(ui, &format!("{:.0} % of bars agree", 100.0 * sc));
+                if t.signature_sections.len() > 1 {
+                    // the meter changes: each part with its time
+                    let mut kinds: Vec<&str> = Vec::new();
+                    for x in &t.signature_sections {
+                        if !kinds.contains(&x.sig.as_str()) {
+                            kinds.push(x.sig.as_str());
+                        }
+                    }
+                    value(ui, &kinds.join(" / "));
+                    for x in &t.signature_sections {
+                        sub(ui, &format!("{} – {}  {}", fmt_t(x.start), fmt_t(x.end), x.sig));
+                    }
+                } else {
+                    value(ui, &t.signature);
+                    if let Some(sc) = t.signature_conf {
+                        sub(ui, &format!("{:.0} % of bars agree", 100.0 * sc));
+                    }
                 }
             }
             None => none(ui, "no steady beat"),
@@ -802,7 +842,9 @@ impl App {
     /// it is), or show it in Explorer / the Finder.
     fn daw_box(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame, name: &str, a: &Analysis, path: &Path) {
         let cache = self.shared.lock().unwrap().cache.clone();
-        let prep = if path.starts_with(&cache) {
+        // a downloaded song (in the cache, deleted on exit) or a format a DAW may not open (AAC, OGG...): a WAV is made for it
+        let daw_friendly = path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["wav", "wave", "aif", "aiff", "flac", "mp3"].contains(&e.to_ascii_lowercase().as_str()));
+        let prep = if path.starts_with(&cache) || !daw_friendly {
             let st = self.daw_prep.entry(path.to_path_buf()).or_insert_with(|| daw::prepare(path.to_path_buf(), &cache, ui.ctx().clone()));
             Some(st.lock().unwrap().clone())
         } else {
@@ -915,6 +957,13 @@ impl App {
                 if let Some(t) = &a.tempo {
                     if !t.beats.is_empty() {
                         lane(0.0, "beats");
+                        // a part in another time signature: shaded under the beats, with its signature
+                        if t.signature_sections.len() > 1 {
+                            for part in t.signature_sections.iter().filter(|q| q.sig != "4/4") {
+                                p.rect_filled(Rect::from_min_max(at(x(part.start), 0.0), at(x(part.end), 18.0)), 2.0, hsla(35.0, 0.7, 0.55, 0.22));
+                                p.text(at(x(part.start) + 3.0, 1.0), Align2::LEFT_TOP, &part.sig, small.clone(), FG);
+                            }
+                        }
                         for &b in &t.beats {
                             let d = t.downbeats.iter().any(|q| (q - b).abs() < 0.0005);
                             p.line_segment([at(x(b), if d { 2.0 } else { 9.0 }), at(x(b), 16.0)], Stroke::new(if d { 1.2 } else { 0.5 }, MUTED));
@@ -928,6 +977,10 @@ impl App {
                         let r = songspec_core::notation::split_chord(&name).map(|x| x.0).unwrap_or(0);
                         let ww = (x(s.end) - x(s.start)).max(1.0);
                         p.rect_filled(Rect::from_min_size(at(x(s.start), 22.0), Vec2::new((ww - 1.0).max(1.0), 30.0)), 3.0, hsla(r as f32 * 30.0, 0.6, 0.55, 0.35));
+                        // a borrowed chord: an orange bar under it (hover it for where it's borrowed from)
+                        if borrowed_from(a, &s.chord).is_some() {
+                            p.rect_filled(Rect::from_min_size(at(x(s.start), 49.0), Vec2::new((ww - 1.0).max(1.0), 3.0)), 1.0, WARN);
+                        }
                         if ww > 24.0 {
                             p.text(at(x(s.start) + 3.0, 24.0), Align2::LEFT_TOP, &name, text.clone(), FG);
                             if self.transpose == 0 {
@@ -951,12 +1004,32 @@ impl App {
                 if let Some(t) = &a.tempo {
                     if t.curve.t.len() > 2 {
                         lane(84.0, "tempo");
-                        let mut v = t.curve.bpm.clone();
+                        // a song that changes meter: its 6/8 part drawn at its eighth-note BPM (the number shown), not the dotted quarter
+                        let six_part = |tt: f64| t.signature_sections.len() > 1 && t.signature_sections.iter().any(|q| q.sig != "4/4" && tt >= q.start && tt < q.end);
+                        let m = |tt: f64| if six_part(tt) { 3.0 } else { 1.0 };
+                        let curve_bpm: Vec<f64> = t.curve.t.iter().zip(&t.curve.bpm).map(|(tt, b)| b * m(*tt)).collect();
+                        let mut v = curve_bpm.clone();
                         v.sort_by(|a, b| a.partial_cmp(b).unwrap());
                         let (lo, hi) = (v[(v.len() as f64 * 0.02) as usize], v[((v.len() as f64 * 0.98) as usize).min(v.len() - 1)]);
                         let y = |b: f64| 136.0 - (((b.clamp(lo, hi) - lo) / (hi - lo).max(1e-6)) * 46.0) as f32;
-                        p.line_segment([at(x(0.0), y(t.bpm_raw)), at(x(dur), y(t.bpm_raw))], Stroke::new(1.5, TARGET));
-                        let pts: Vec<Pos2> = t.curve.t.iter().zip(&t.curve.bpm).map(|(tt, b)| at(x(*tt), y(*b))).collect();
+                        // the green line: each BPM section at its own tempo (a beat switch steps up or down), else the song's tempo
+                        let green = Stroke::new(1.5, TARGET);
+                        if t.sections.len() > 1 {
+                            let n = t.sections.len();
+                            for (i, s) in t.sections.iter().enumerate() {
+                                let x0 = if i == 0 { 0.0 } else { s.start };
+                                let x1 = if i + 1 == n { dur } else { t.sections[i + 1].start };
+                                let b = s.bpm * m(0.5 * (s.start + s.end));
+                                p.line_segment([at(x(x0), y(b)), at(x(x1), y(b))], green);
+                                if i + 1 < n {
+                                    let nx = &t.sections[i + 1];
+                                    p.line_segment([at(x(x1), y(b)), at(x(x1), y(nx.bpm * m(0.5 * (nx.start + nx.end))))], green);
+                                }
+                            }
+                        } else {
+                            p.line_segment([at(x(0.0), y(t.bpm_raw)), at(x(dur), y(t.bpm_raw))], green);
+                        }
+                        let pts: Vec<Pos2> = t.curve.t.iter().zip(&curve_bpm).map(|(tt, b)| at(x(*tt), y(*b))).collect();
                         p.add(egui::Shape::line(pts, Stroke::new(1.0, CURVE)));
                         p.text(at(4.0, 100.0), Align2::LEFT_TOP, format!("{hi:.0}"), small.clone(), MUTED);
                         p.text(at(4.0, 126.0), Align2::LEFT_TOP, format!("{lo:.0}"), small.clone(), MUTED);
@@ -969,6 +1042,16 @@ impl App {
                         p.line_segment([at(x(0.0), 164.0), at(x(dur), 164.0)], Stroke::new(1.0, LINE));
                         let pts: Vec<Pos2> = d.drift.iter().map(|q| at(x(q.t), y(q.cents))).collect();
                         p.add(egui::Shape::line(pts, Stroke::new(1.5, ACCENT)));
+                        // each part's detune written on the lane, with a tick where it changes
+                        if d.parts.len() > 1 {
+                            for (i, q) in d.parts.iter().enumerate() {
+                                if i > 0 {
+                                    p.line_segment([at(x(q.start), 150.0), at(x(q.start), 170.0)], Stroke::new(1.0, MUTED));
+                                }
+                                let txt = format!("{}{:.0} ¢", if q.cents >= 0.0 { "+" } else { "−" }, q.cents.abs());
+                                p.text(at(x(q.start) + 4.0, 147.0), Align2::LEFT_TOP, txt, small.clone(), FG);
+                            }
+                        }
                     }
                 }
                 let mut t = 0.0;
@@ -984,6 +1067,19 @@ impl App {
                 }
                 if resp.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    // over a borrowed chord: which scale it comes from
+                    if let Some(pos) = resp.hover_pos() {
+                        let (tx, ty) = (((pos.x - o.x - 50.0) / pxs) as f64, pos.y - o.y);
+                        if (22.0..54.0).contains(&ty) {
+                            let seg = a.chords.as_ref().and_then(|c| c.segments.iter().find(|s| s.chord != "N" && s.start <= tx && tx < s.end));
+                            if let Some(s) = seg {
+                                if let Some(from) = borrowed_from(a, &s.chord) {
+                                    let name = exports::transform(&s.chord, self.transpose, self.simple, key);
+                                    resp.clone().on_hover_text_at_pointer(format!("{name}: borrowed from {from}"));
+                                }
+                            }
+                        }
+                    }
                 }
             });
             self.tl_view_w = out.inner_rect.width();
@@ -1058,7 +1154,24 @@ impl App {
             ui.add(egui::TextEdit::multiline(&mut d.links).hint_text("https://open.spotify.com/track/…\nhttps://www.youtube.com/watch?v=…").desired_rows(3).desired_width(f32::INFINITY));
             sub(ui, "One per line. A whole album or playlist is added song by song. Spotify and Apple Music songs are found on YouTube by title, artist and length.");
             match &yt {
-                Ytdlp::Ready => {}
+                Ytdlp::Ready => {
+                    ui.add_space(4.0);
+                    let mut b = fetch::cookies_from();
+                    let before = b.clone();
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Use my browser's YouTube login").size(13.0));
+                        egui::ComboBox::from_id_salt("cookies").selected_text(b.clone().map(|x| title_case(&x)).unwrap_or("No".into())).show_ui(ui, |ui| {
+                            ui.selectable_value(&mut b, None, "No");
+                            for br in fetch::BROWSERS {
+                                ui.selectable_value(&mut b, Some(br.to_string()), title_case(br));
+                            }
+                        });
+                    });
+                    if b != before {
+                        fetch::set_cookies_from(b);
+                    }
+                    sub(ui, "Only needed when YouTube asks to confirm you're not a bot, or for age-restricted songs. yt-dlp reads that browser's                              YouTube sign-in on this computer and uses it with YouTube only. Sign in to YouTube in that browser first; Chrome                              and Edge must be closed (and on Windows may still refuse), Firefox works best.");
+                }
                 Ytdlp::Missing | Ytdlp::Failed(_) => {
                     ui.add_space(4.0);
                     ui.label(RichText::new("Links need yt-dlp (free, about 20–40 MB from its official GitHub release), which isn't installed yet.").size(13.0).color(WARN));

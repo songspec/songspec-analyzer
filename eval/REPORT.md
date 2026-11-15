@@ -105,6 +105,56 @@ The BPM of a 6/8 song is its eighth-note tempo, and the beat tracker follows eig
 others (Are We Still Friends, 91 -> 182 eighths). The octave is the one that puts the eighths in [115, 230): the 1.3 songs keep their
 values (127-216), Are We Still Friends reads 182-187* (tracker 182 / 191).
 
+### 1.5 The 1.5 issue list: 6/8 levels, dotted quarters, triplet feel, 12/8 (2026-11-15, `eval/v15_eval.py`, `eval/v15_labels.json`)
+
+The user's list of 26 songs with the tracker's values (`eval/v15_labels.json`; audio from yt-dlp, not in git). Before (1.4.1): every tracker
+BPM found on 11 of 26, time signature right on 18. The catalog is the regression check (164 songs with a BPM: 152 within 1 %, all 9 of its
+6/8 songs found, no false 6/8) and did not change with anything below.
+
+- **The 6/8 level (fixed).** On most of the failing 6/8 songs the beat tracker had the right eighth-note tempo (Spaceship 176.5, Ensalada
+  187.5, Same Problems 166.7, So Far Ahead 157.9), but BPM Fixer cleans a 6/8 song on the dotted quarter, three of those beats, and the
+  factor between the two grids was rounded to a power of two (2^round(log2(1/3)) = 1/4): 118.8 for 178.2, 125.3 for 188, 221.3 for 166,
+  213.3 for 160. The ratio is now snapped to the musical ones (powers of two times 1, 3 or 1/3: `tempo::snap_ratio`). All four right.
+- **3/4 (dropped).** 1.3-1.4 kept bar after bar of 3 as 3/4 (untested: the catalog has no 3/4 song). The tracker writes such a song as 6/8
+  (Earned It: 3 beats in 93 % of its bars, "6/8, 120"), so it now is.
+- **Dotted quarters (new).** On Chapter Six the beat tracker followed the dotted quarter itself (68 BPM; tracker 204 = 3 x 68). Its beats
+  then hold three eighths each: the onset strength at 1/3 and 2/3 of each beat exceeds that at 1/2 (`Grouping::triplet`). Chapter Six
+  +0.285 at 68 BPM; the highest 4/4 songs +0.30 to +0.39, all at 116-142 BPM (triplet hi-hats), and BACKR00MS +0.214 at 73 BPM. Rule:
+  triplet >= 0.25 and beat <= 84 BPM. Fixes Chapter Six (204*) with no false 6/8, but on one song each side of a thin margin.
+- **12/8 (shown as a reading, not detected).** The tracker writes a 12/8 song's BPM as twice its dotted quarter (Feel The Fiyaaaah 118.666,
+  Mr Wrong 113.3, MONDAY 144) and a 6/8 song's as three times. Their dotted-quarter tempos and bar counts overlap with the 6/8 songs', so
+  nothing here tells them apart; the "(4/4 or 12/8)" chip on every 6/8 song carries that value (118.7, 112.9, 144).
+- **Triplet feel (shown as a reading, not fixed).** Sherane (89; shown 133.5) and Sing About Me (83.02; shown ~111) are cleaned by BPM
+  Fixer a triplet ratio (3/2, 4/3) away from the beat tracker, which had the tracker's tempo. On the catalog the same disagreement occurs
+  on 3 songs where BPM Fixer is the one that matches the tracker (BEING YOURSELF, Luv Is Rage 2, a Quadeca song), and onset salience
+  (on-beat vs half-beat onsets) favours the raw grid on all five, so there is nothing to decide by. The other reading is now an alternate
+  chip ("89 (triplet feel)", "83.4 (triplet feel)").
+- **Beat switches (unchanged).** Looser switch detection (4 % shift, 24 beats, big shifts without the bar check) finds the user's Momma
+  and Wesley's Theory switches but adds false switches faster than it finds real ones on the catalog (catalog songs with a tracker switch
+  found 5 -> 16 of 27, false switches 2 -> 15); the false ones are the beat tracker jumping a triplet ratio mid-song, and Wesley's real
+  switch is itself a 4/3 ratio. A spectral-change check at the cut did not separate them either. Still missed: Momma 84 / 115.2,
+  Wesley's Theory 85 / 114, Hood Politics' 151 outro; Changes (137 / 134.8) and Sing About Me (83.02 / 84.5) differ by under 2 %, inside the
+  beat tracker's own wobble.
+- **Not fixed:** SORRY NOT SORRY (6/8 191.6; the beat tracker's 176.5 has no groups-of-3 evidence; shown as 4/4 ~96).
+
+### 1.6 Time signature by part (2026-11-15, `tempo::meter_region`)
+
+The groups-of-3 score of 1.4 in windows of 48 beats (every 12): a part in 6/8 is the run of windows with the largest sum of (score - 0.4),
+at least 4 windows long, averaging 0.55 or more while the rest of the song averages 0 or less, and covering at most 75 % of the song
+(a whole-song 6/8 is the 1.3 / 1.4 rule's). Thresholds chosen on the Rust engine's scores over the catalog and the 26 songs:
+
+| | found | false |
+|---|---|---|
+| the user's songs with a 6/8 part (3) | **2**: MEET YOUR PADRE 3:34-end (tracker 3:23), The Blacker The Berry's outro 4:58-end | |
+| catalog songs with no 6/8 in the notes (156) | | 1 (WILSHIRE 7:10-8:01, its last minute) |
+
+Also RUIN MY LIFE 0:26-1:30 (notes: "may work in 6/8, intro and breakdown especially"). Missed: Changes (2:55-4:01). The part becomes its
+own tempo section with its own signature and its eighth-note BPM, taken at the beat tracker's level inside the part (the cleaning sat a
+triplet ratio away on MEET YOUR PADRE's): MEET YOUR PADRE 127.5 / 131.6* (tracker 127.5 / 131.5*), The Blacker The Berry 88 / 212*
+(tracker 88 / 212*). The tempo line on the timeline steps with each section.
+
+**The 26 songs after 1.5's tempo work:** every tracker BPM found 11 -> **17**, time signature 18 -> **22**; catalog unchanged.
+
 ## 2. Detune (milestone 3, 2026-10-26)
 
 ### 2.1 Parity with the Centsible plugin's DSP (`eval/detune_parity.py`)
@@ -145,6 +195,14 @@ Target (PLAN.md): MAE < 2 cents. **Met** (0.27 / 0.64).
   20 shifts within 0.96 cents.
 - The one large error is *CASPER* under Rubber Band (35 cents): a harmonic alias, the failure mode Centsible's own REPORT
   documents on dense mixes, reported with a wide interval (1.1 cents on the original).
+
+### 2.3 Tuning by part (2026-11-15, `detune::tuning_parts`)
+
+A part pitched differently (Hood Politics' intro, "pitched down 0.4 semitones") shows as a step in the drift curve (10 s windows every
+5 s). Binary segmentation of the curve: parts of at least 4 points (about 20 s) whose medians differ by 15 cents or more. Hood Politics:
+0:00-0:32 at -30 cents, then +2 (tracker: -40 for the intro). On the catalog 27 of 165 songs get parts: 13 are songs the tracker lists
+with several keys, 2 have notes about a part pitched differently, the rest are probably live tuning that moves. The app writes them as
+measured ("tuning by part"), not as a claim that the part was pitched on purpose.
 
 ## 3. Key (milestones 4 and 6, 2026-10-26)
 
@@ -314,6 +372,21 @@ The Rust engine on the whole catalog, 1.3 -> 1.4 (with the 6/8 rule of 1.4): key
 false 6/8 1 -> 0. Seventeen songs changed in all; every change was checked against the tracker.
 
 The app shows a modal key by its mode ("G Phrygian Dominant", with the tracker's field "G Minor*" under it).
+
+### 3.11 Key switches, again (2026-11-15, the 1.5 issue list)
+
+The user's list has 10 songs whose key changes were missed (Garden Shed's Db Major bridge, King Kunta's two F Minor passages, So Far
+Ahead, Wesley's Theory's Eb Major intro, Institutionalized, Sing About Me, Momma, Hood Politics, The Blacker The Berry, u) and one false
+change (Feel The Fiyaaaah's Eb Major middle). The section HMM of 3.4 on the Rust engine, full analyses of the catalog and the 26 songs:
+
+| change penalty / shortest section | catalog multi-key songs split (of 30) | one-key songs split falsely (of 135) | the 26 songs: key switches right | first key right |
+|---|---|---|---|---|
+| **24 / 12 bars (shipped, unchanged)** | **8** | **2** | **8** | **18** |
+| 12 / 8 bars | 16 | 18 | 11 | 17 |
+
+The looser setting finds twice the key changes and makes nine times the false ones (a wrong "C Minor / F Major" on a one-key song), so
+the default stays. King Kunta's F Minor passages are 8 bars each, under any shortest-section setting that keeps the false splits down.
+(Knobs for these runs: SONGSPEC_EVAL_KEY_PENALTY / _MIN_BARS / _WINDOW / _HOP; unset in the app.)
 
 ## 4. Chords with BTC (approved by the user, 2026-10-26; `eval/chord_blend.py`)
 BTC (large vocabulary, 170 chords) runs on the tuning-corrected CQT and its per-frame probabilities are blended per beat with the

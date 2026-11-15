@@ -6,6 +6,8 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
@@ -277,6 +279,9 @@ pub fn install_ytdlp() -> Result<PathBuf, String> {
 
 fn run(exe: &Path, args: &[&str]) -> Result<String, String> {
     let mut c = Command::new(exe);
+    if let Some(b) = cookies_from() {
+        c.args(["--cookies-from-browser", &b]);
+    }
     c.args(args);
     #[cfg(windows)]
     {
@@ -287,12 +292,110 @@ fn run(exe: &Path, args: &[&str]) -> Result<String, String> {
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         let last = err.lines().filter(|l| l.contains("ERROR")).last().unwrap_or(err.lines().last().unwrap_or("")).to_string();
-        return Err(format!("yt-dlp: {}", last.trim()));
+        return Err(explain(last.trim()));
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
-/// The best YouTube video for a song: of the first 5 search results, the one whose length is closest to the song's.
+/// yt-dlp's error line -> what happened and what to do, in a sentence (its own lines run to several hundred characters).
+pub fn explain(line: &str) -> String {
+    let l = line.to_lowercase();
+    let browser = cookies_from();
+    if l.contains("not a bot") {
+        return match browser {
+            None => "YouTube wants to confirm you're not a bot (it asks after many downloads from one connection). Wait a while and                      try again, or turn on \"Use my browser's YouTube login\" in Add songs."
+                .into(),
+            Some(b) => format!("YouTube wants to confirm you're not a bot, even with {}'s login. Open YouTube in {} once (signed in), then try again.", title(&b), title(&b)),
+        };
+    }
+    if l.contains("confirm your age") || l.contains("inappropriate for some") || l.contains("age-restricted") || l.contains("age restricted") {
+        return "This video is age-restricted: YouTube only plays it to a signed-in account. Turn on \"Use my browser's YouTube login\" in                 Add songs (with a browser where you're signed in to YouTube)."
+            .into();
+    }
+    if l.contains("cookie") && (l.contains("could not copy") || l.contains("decrypt") || l.contains("permission") || l.contains("locked")) {
+        return format!(
+            "yt-dlp couldn't read {}'s YouTube login. Close that browser and try again; Chrome and Edge on Windows may still refuse              (they lock and encrypt their cookies), Firefox works.",
+            browser.as_deref().map(title).unwrap_or_else(|| "the browser".into())
+        );
+    }
+    if l.contains("http error 403") {
+        return "YouTube refused the download (HTTP 403). yt-dlp was updated and it was tried again; if it keeps happening, wait a while                 or turn on \"Use my browser's YouTube login\" in Add songs."
+            .into();
+    }
+    let short: String = line.trim_start_matches("ERROR:").trim().chars().take(220).collect();
+    format!("yt-dlp: {short}")
+}
+
+fn title(b: &str) -> String {
+    let mut c = b.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+}
+
+// ------------------------------------------------------------------------- YouTube's sign-in, updates, pacing
+
+/// Browsers yt-dlp can take the YouTube sign-in (cookies) from.
+pub const BROWSERS: &[&str] = if cfg!(target_os = "macos") {
+    &["firefox", "safari", "chrome", "edge", "brave", "opera", "vivaldi"]
+} else {
+    &["firefox", "chrome", "edge", "brave", "opera", "vivaldi"]
+};
+
+static COOKIES_FROM: Mutex<Option<String>> = Mutex::new(None);
+
+/// The browser whose YouTube sign-in yt-dlp uses (None: none, the default). It answers YouTube's "confirm you're not a bot" and
+/// lets age-restricted videos play; the cookies stay on this computer (yt-dlp reads them and talks to YouTube only).
+pub fn cookies_from() -> Option<String> {
+    COOKIES_FROM.lock().unwrap().clone()
+}
+
+fn settings_path() -> PathBuf {
+    app_dir().join("settings.json")
+}
+
+pub fn set_cookies_from(b: Option<String>) {
+    *COOKIES_FROM.lock().unwrap() = b.clone();
+    let _ = std::fs::create_dir_all(app_dir());
+    let _ = std::fs::write(settings_path(), serde_json::json!({ "cookies_from_browser": b }).to_string());
+}
+
+pub fn load_settings() {
+    if let Ok(s) = std::fs::read_to_string(settings_path()) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+            let b = v["cookies_from_browser"].as_str().filter(|b| BROWSERS.contains(b)).map(str::to_string);
+            *COOKIES_FROM.lock().unwrap() = b;
+        }
+    }
+}
+
+/// YouTube changes often and older yt-dlp copies start failing (HTTP 403, "unable to download"): the copy this app installed is
+/// fetched again from the official release when it is older than this, or right away after a 403. Copies installed elsewhere
+/// (PATH, Homebrew) are left to their owner.
+const YTDLP_MAX_AGE: Duration = Duration::from_secs(3 * 24 * 3600);
+
+pub fn refresh_ytdlp(force: bool) -> Result<bool, String> {
+    let ours = app_dir().join(YTDLP_NAME);
+    if ytdlp().as_deref() != Some(ours.as_path()) {
+        return Ok(false);
+    }
+    let age = std::fs::metadata(&ours).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).unwrap_or(YTDLP_MAX_AGE);
+    if !force && age < YTDLP_MAX_AGE {
+        return Ok(false);
+    }
+    install_ytdlp().map(|_| true)
+}
+
+/// At most one YouTube download every few seconds: a quick run of downloads (a whole album) is what makes YouTube ask for a sign-in.
+const DOWNLOAD_GAP: Duration = Duration::from_secs(4);
+static LAST_DOWNLOAD: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn pace() {
+    let wait = LAST_DOWNLOAD.lock().unwrap().map(|t| DOWNLOAD_GAP.saturating_sub(t.elapsed())).unwrap_or_default();
+    if !wait.is_zero() {
+        std::thread::sleep(wait);
+    }
+    *LAST_DOWNLOAD.lock().unwrap() = Some(Instant::now());
+}
+
 pub fn find_on_youtube(exe: &Path, t: &Track) -> Result<String, String> {
     let q = format!("ytsearch5:{} audio", t.label());
     let out = run(exe, &["--flat-playlist", "--no-warnings", "--print", "%(id)s\t%(duration)s", &q])?;
@@ -319,6 +422,15 @@ pub fn find_on_youtube(exe: &Path, t: &Track) -> Result<String, String> {
 /// Download a YouTube video's audio (M4A / AAC, which the analyzer decodes without ffmpeg) into `dir`. -> (file, video title).
 pub fn download(exe: &Path, url: &str, dir: &Path) -> Result<(PathBuf, String), String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    pace();
+    match download_once(exe, url, dir) {
+        // an out-of-date yt-dlp is the usual cause: update it and try once more
+        Err(e) if e.contains("HTTP 403") && refresh_ytdlp(true).unwrap_or(false) => download_once(exe, url, dir),
+        r => r,
+    }
+}
+
+fn download_once(exe: &Path, url: &str, dir: &Path) -> Result<(PathBuf, String), String> {
     let tmpl = dir.join("%(id)s.%(ext)s");
     let out = run(
         exe,

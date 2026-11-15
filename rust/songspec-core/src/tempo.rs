@@ -19,6 +19,9 @@ pub struct Section {
     pub drift_pct: f64,
     pub steadiness: String,
     pub core_share: f64,
+    /// this section's own time signature, when the song changes meter (a part in 6/8)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
 }
 
 /// Felt BPM per beat (downsampled to at most ~1500 points), for a tempo lane.
@@ -37,6 +40,19 @@ pub struct TempoDisplay {
 
 /// The contract's `tempo` section.
 #[derive(Debug, Clone, Serialize)]
+pub struct SigSection {
+    pub start: f64,
+    pub end: f64,
+    pub sig: String,
+}
+
+/// m:ss
+fn mmss(t: f64) -> String {
+    let t = t.round().max(0.0) as i64;
+    format!("{}:{:02}", t / 60, t % 60)
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Tempo {
     pub bpm: Option<f64>,
     /// the BPM at the house rule's level, to 3 decimals (130.000, 134.759): what the tempo actually measures, unrounded
@@ -48,6 +64,8 @@ pub struct Tempo {
     pub signature: String,
     pub signature_conf: Option<f64>,
     pub compound: bool,
+    /// the time signature by part, when it changes ([] for one meter throughout)
+    pub signature_sections: Vec<SigSection>,
     pub sections: Vec<Section>,
     pub range: Option<[f64; 2]>,
     pub irregularity_pct: f64,
@@ -93,6 +111,12 @@ const TRIPLE_VETO: f64 = 0.0;
 /// The 6/8 BPM is the eighth-note tempo (the tracker's "176*"); the beat tracker may follow eighths or quarters, so the octave is
 /// the one that puts the eighths in [EIGHTH_MIN, 2 * EIGHTH_MIN).
 const EIGHTH_MIN: f64 = 115.0;
+/// The tracker's beats are dotted quarters (the song is 6/8, each beat holds three eighths) when the onsets inside each beat fall
+/// on its thirds more than on its half (Grouping::triplet) and the beat is slow enough to be a dotted quarter. Chapter Six: +0.285
+/// at 68 BPM; 4/4 songs: +0.214 at 73 BPM (BACKR00MS), higher only at 116-142 BPM (triplet hi-hats) (eval/REPORT.md 1.5). A thin
+/// margin, one song on each side of it.
+const DOTTED_TRIPLET: f64 = 0.25;
+const DOTTED_MAX_BPM: f64 = 84.0;
 
 /// 3 or 6 when the beat tracker's most common count per bar says 6/8 (at least 30 % of bars), else None.
 fn compound_meter(beats: &[f64], down: Option<&[f64]>) -> Option<usize> {
@@ -110,10 +134,64 @@ fn compound_meter(beats: &[f64], down: Option<&[f64]>) -> Option<usize> {
     let best = (0..vals.len()).fold(0, |b, i| if c[i] > c[b] { i } else { b });
     let m = vals[best];
     let share = c[best] as f64 / counts.len() as f64;
-    if m == 3 && share >= 0.85 {
-        return None; // bar after bar of 3: a waltz (3/4), not the messy bars of 6/8 (engine.WALTZ_MIN_SHARE)
-    }
+    // (1.3-1.4 kept bar after bar of 3 (85 %) as 3/4, untested on real songs; the tracker writes such a song as 6/8: Earned It,
+    // 3 beats in 93 % of its bars, is "6/8, 120")
     ((m == 3 || m == 6) && share >= 0.3).then_some(m as usize)
+}
+
+/// A tempo ratio snapped to the nearest of the ones a beat grid can have against another: a power of two times 1, 3 or 1/3
+/// (so 1/3, 2/3, 3/4, 4/3, 3/2, 3 as well as 1/2, 2).
+pub fn snap_ratio(q: f64) -> f64 {
+    if !(q.is_finite() && q > 0.0) {
+        return 1.0;
+    }
+    let mut best = (f64::INFINITY, 1.0);
+    for k in -4..=4 {
+        for m in [1.0, 3.0, 1.0 / 3.0] {
+            let c = m * 2f64.powi(k);
+            let d = (q / c).ln().abs();
+            if d < best.0 - 1e-12 {
+                best = (d, c);
+            }
+        }
+    }
+    best.1
+}
+
+/// A part of a song in 6/8 (Changes 2:55-4:01, MEET YOUR PADRE from 3:23, The Blacker The Berry's outro): the groups-of-3 score
+/// in windows of METER_WIN beats (every METER_STEP); the run of windows with the largest sum of (score - METER_THETA), when it is
+/// at least METER_MIN_WINDOWS long, averages METER_INSIDE or more while the rest of the song averages METER_OUTSIDE or less, and
+/// covers at most 75 % of the song (eval/REPORT.md 1.6).
+pub const METER_WIN: usize = 48;
+pub const METER_STEP: usize = 12;
+const METER_THETA: f64 = 0.4;
+const METER_MIN_WINDOWS: usize = 4;
+const METER_INSIDE: f64 = 0.55;
+const METER_OUTSIDE: f64 = 0.0;
+
+/// (start, end) of the part in 6/8, when there is one.
+pub fn meter_region(windows: &[(f64, f64, f64)]) -> Option<(f64, f64)> {
+    let s: Vec<f64> = windows.iter().map(|w| w.2).collect();
+    let (mut best, mut cur, mut start, mut bi, mut bj) = (0.0, 0.0, 0usize, 0usize, 0usize);
+    for (k, v) in s.iter().enumerate() {
+        if cur <= 0.0 {
+            cur = 0.0;
+            start = k;
+        }
+        cur += v - METER_THETA;
+        if cur > best {
+            best = cur;
+            bi = start;
+            bj = k + 1;
+        }
+    }
+    if bj - bi < METER_MIN_WINDOWS || (bj - bi) as f64 > 0.75 * s.len() as f64 {
+        return None;
+    }
+    let inside = s[bi..bj].iter().sum::<f64>() / (bj - bi) as f64;
+    let rest: Vec<f64> = s[..bi].iter().chain(&s[bj..]).cloned().collect();
+    let outside = if rest.is_empty() { 0.0 } else { rest.iter().sum::<f64>() / rest.len() as f64 };
+    (inside >= METER_INSIDE && outside <= METER_OUTSIDE).then(|| (windows[bi].0, windows[bj - 1].1))
 }
 
 /// Lags (in beats) of the grouping features.
@@ -128,6 +206,11 @@ pub struct Grouping {
     pub bass: [f64; 6],
     /// share of the tracker's bars with 3 or 6 beats
     pub share36: f64,
+    /// inside each beat: onset strength at 1/3 and 2/3 of it minus at 1/2 (relative to the beat's own onset); > 0 when each beat
+    /// holds three eighths, i.e. the tracker counted dotted quarters (Chapter Six: +0.26)
+    pub triplet: f64,
+    /// the same groups-of-3 score (triple_on + triple_bass) in windows of METER_WIN beats, every METER_STEP: (start, end, score)
+    pub windows: Vec<(f64, f64, f64)>,
 }
 
 impl Grouping {
@@ -178,6 +261,10 @@ pub fn beat_grouping(y: &[f32], sr: f64, beats: &[f64], down: Option<&[f64]>) ->
     let gmax = frames.iter().flatten().flatten().cloned().fold(0f32, f32::max).max(1e-10);
     let floor = gmax * 1e-4; // librosa.amplitude_to_db(ref=max, top_db=80)
     let db = |m: &[f32]| -> Vec<f32> { m.iter().map(|&v| 20.0 * v.max(floor).log10()).collect() };
+    let beat_t: Vec<f64> = beats.iter().cloned().filter(|t| {
+        let f = (t * sr / hop as f64).round() as i64;
+        f >= 3 && f + 2 < n_frames
+    }).collect();
     let mut on = Vec::with_capacity(centres.len());
     let mut bass = Vec::with_capacity(centres.len());
     for fr in &frames {
@@ -203,6 +290,31 @@ pub fn beat_grouping(y: &[f32], sr: f64, beats: &[f64], down: Option<&[f64]>) ->
         }
         out
     };
+    // the onset at 1/3, 2/3 and 1/2 of each beat (the same flux, same floor as above)
+    let flux_at = |t: f64| -> Option<f64> {
+        let c = (t * sr / hop as f64).round() as i64;
+        if c < 3 || c + 2 >= n_frames {
+            return None;
+        }
+        let fr: Vec<Vec<f32>> = (c - 2..=c + 1).map(|f| db(&mag(f))).collect();
+        Some((1..4).map(|k| fr[k].iter().zip(&fr[k - 1]).map(|(a, p)| (a - p).max(0.0) as f64).sum::<f64>() / n_bins as f64).fold(0.0, f64::max))
+    };
+    let (mut e0, mut e1, mut e2, mut eh) = (vec![], vec![], vec![], vec![]);
+    for w in beats.windows(2) {
+        let d = w[1] - w[0];
+        if let (Some(a), Some(t1), Some(t2), Some(h)) = (flux_at(w[0]), flux_at(w[0] + d / 3.0), flux_at(w[0] + 2.0 * d / 3.0), flux_at(w[0] + d / 2.0)) {
+            e0.push(a);
+            e1.push(t1);
+            e2.push(t2);
+            eh.push(h);
+        }
+    }
+    let triplet = if e0.len() >= 16 {
+        let on0 = median(&e0).max(1e-9);
+        (0.5 * (median(&e1) + median(&e2)) - median(&eh)) / on0
+    } else {
+        0.0
+    };
     let share36 = match down {
         Some(d) if d.len() >= 6 => {
             let tol = 0.3 * median(&diff(beats));
@@ -212,7 +324,17 @@ pub fn beat_grouping(y: &[f32], sr: f64, beats: &[f64], down: Option<&[f64]>) ->
         }
         _ => 0.0,
     };
-    Some(Grouping { on: ac(&on), bass: ac(&bass), share36 })
+    let score_of = |o: &[f64], b: &[f64]| {
+        let g = Grouping { on: ac(o), bass: ac(b), share36: 0.0, triplet: 0.0, windows: vec![] };
+        g.triple_on() + g.triple_bass()
+    };
+    let mut windows = Vec::new();
+    let mut i = 0;
+    while i + METER_WIN < on.len() {
+        windows.push((beat_t[i], beat_t[i + METER_WIN], score_of(&on[i..i + METER_WIN], &bass[i..i + METER_WIN])));
+        i += METER_STEP;
+    }
+    Some(Grouping { on: ac(&on), bass: ac(&bass), share36, triplet, windows })
 }
 
 /// Beat period from a robust straight-line fit of beat time against beat index (trims outliers twice).
@@ -372,7 +494,7 @@ fn section_stats(sb: &[f64], spec: &Spec) -> Section {
     let loc = local_tempo(sb, spec);
     let (start, end) = (py_round(sb[0], 3), py_round(sb[sb.len() - 1], 3));
     if loc.len() < 3 {
-        return Section { start, end, bpm: py_round(line_bpm, 2), bpm_exact: line_bpm, lo: None, hi: None, drift_pct: 0.0, steadiness: "steady".into(), core_share: 1.0 };
+        return Section { start, end, bpm: py_round(line_bpm, 2), bpm_exact: line_bpm, lo: None, hi: None, drift_pct: 0.0, steadiness: "steady".into(), core_share: 1.0, signature: None };
     }
     let mode = bf::log_mode(&loc, &vec![1.0; loc.len()]);
     let core: Vec<f64> = loc.iter().cloned().filter(|v| (v / mode).ln().abs() <= CORE_BAND.ln_1p()).collect();
@@ -391,6 +513,7 @@ fn section_stats(sb: &[f64], spec: &Spec) -> Section {
         drift_pct: py_round(drift, 2),
         steadiness: steadiness.into(),
         core_share: py_round(core.len() as f64 / loc.len() as f64, 3),
+        signature: None,
     }
 }
 
@@ -406,6 +529,10 @@ pub struct Analysis {
     pub beats: Vec<f64>,
     pub downbeats: Vec<f64>,
     pub curve: Curve,
+    /// the meter evidence (for the evaluation scripts)
+    pub grouping: Option<Grouping>,
+    /// the beat tracker's own tempo (median of its raw beats), before cleaning
+    pub raw_bpm: f64,
 }
 
 /// engine.analyze: y mono at the file's own rate, the tracker's raw beats / downbeats. `signature`: "Auto" or a name.
@@ -427,23 +554,36 @@ pub fn analyze(y: &[f32], sr: f64, raw: &[f64], down_raw: &[f64], signature: &st
     // 6/8 (engine.compound_meter in the service): 3 per bar = eighths in dotted-quarter groups, cleaned as 3/4 and reported as
     // 6/8 below; 6 per bar = a whole 6/8 bar
     let mut compound = if sig_auto { compound_meter(&raw, down) } else { None };
-    if sig_auto {
-        if let Some(g) = beat_grouping(y, sr, &raw, down) {
-            let score = g.triple_on() + g.triple_bass();
-            if compound.is_some() && score < TRIPLE_VETO {
-                compound = None;
-            } else if compound.is_none() && sig != "3/4" && g.share36 >= TRIPLE_SHARE && score >= TRIPLE_SCORE {
-                compound = Some(3);
-            }
+    let grouping = if sig_auto { beat_grouping(y, sr, &raw, down) } else { None };
+    if let Some(g) = &grouping {
+        let score = g.triple_on() + g.triple_bass();
+        let raw_bpm = 60.0 / median(&diff(&raw));
+        if compound.is_some() && score < TRIPLE_VETO {
+            compound = None;
+        } else if compound.is_none() && sig != "3/4" && g.share36 >= TRIPLE_SHARE && score >= TRIPLE_SCORE {
+            compound = Some(3);
+        } else if compound.is_none() && g.triplet >= DOTTED_TRIPLET && raw_bpm <= DOTTED_MAX_BPM {
+            compound = Some(2); // the tracker's beats are dotted quarters, each holding three eighths
         }
     }
     match compound {
         Some(3) => sig = "3/4",
-        Some(6) => sig = "6/8",
+        Some(2) | Some(6) => sig = "6/8",
         _ => {}
     }
     let spec = bf::sig_spec(sig).ok_or_else(|| format!("unknown time signature {sig}"))?;
-    let switches = find_switches(&raw, down);
+    let mut switches = find_switches(&raw, down);
+    // a part of the song in 6/8 (the rest in 4/4): its edges cut the song like a beat switch
+    let meter_part = if compound.is_none() && sig == "4/4" { grouping.as_ref().and_then(|g| meter_region(&g.windows)) } else { None };
+    if let Some((a, b)) = meter_part {
+        for t in [a, b] {
+            if t > 10.0 && t < duration - 10.0 && switches.iter().all(|s| (s - t).abs() > 10.0) {
+                switches.push(t);
+            }
+        }
+        switches.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    }
+    let in_part = |a: f64, b: f64| meter_part.is_some_and(|(p0, p1)| (0.5 * (a + b) >= p0) && (0.5 * (a + b) < p1));
     let beats: Vec<f64> = if switches.is_empty() {
         pipeline(y, sr, &raw, down, duration, &spec).map_err(|e| format!("No steady beat found in this file ({})", e.0))?
     } else {
@@ -490,7 +630,7 @@ pub fn analyze(y: &[f32], sr: f64, raw: &[f64], down_raw: &[f64], signature: &st
         }
         let s = section_stats(&sb, &spec);
         if let Some(last) = sections.last() {
-            if (s.bpm / last.bpm).ln().abs() < 1.03f64.ln() {
+            if (s.bpm / last.bpm).ln().abs() < 1.03f64.ln() && in_part(last.start, last.end) == in_part(s.start, s.end) {
                 let st = last.start;
                 let sb2: Vec<f64> = beats.iter().cloned().filter(|&t| t >= st - 1e-6 && t < b).collect();
                 let merged = section_stats(&sb2, &spec);
@@ -502,6 +642,33 @@ pub fn analyze(y: &[f32], sr: f64, raw: &[f64], down_raw: &[f64], signature: &st
     }
     if sections.is_empty() {
         return Err("No steady beat found in this file.".into());
+    }
+    // (factor applied to each section's tempo: 1, or for the 6/8 part the one that puts its eighths in [EIGHTH_MIN, 2 EIGHTH_MIN))
+    let mut part_factor: Vec<(f64, f64, f64)> = Vec::new();
+    if meter_part.is_some() {
+        for s in sections.iter_mut() {
+            let six = in_part(s.start, s.end);
+            s.signature = Some(if six { "6/8" } else { "4/4" }.into());
+            if six && s.bpm > 0.0 {
+                // the eighths' level from the tracker's own beats in this part (the cleaning may sit a triplet ratio away:
+                // MEET YOUR PADRE's 6/8 part cleaned at 87.8 for eighths at 131.5), the cleaned tempo for the precision
+                let rp: Vec<f64> = raw.iter().cloned().filter(|&t| t >= s.start && t < s.end).collect();
+                let mut e = if rp.len() >= 8 { 60.0 / median(&diff(&rp)) } else { s.bpm };
+                while e < EIGHTH_MIN {
+                    e *= 2.0;
+                }
+                while e >= 2.0 * EIGHTH_MIN {
+                    e /= 2.0;
+                }
+                let e = s.bpm * snap_ratio(e / s.bpm);
+                let g = (e / 3.0) / s.bpm;
+                s.bpm = py_round(s.bpm * g, 2);
+                s.lo = s.lo.map(|v| py_round(v * g, 2));
+                s.hi = s.hi.map(|v| py_round(v * g, 2));
+                s.bpm_exact *= g;
+                part_factor.push((s.start, s.end, g));
+            }
+        }
     }
     let main = sections.iter().fold(&sections[0], |m, s| if s.end - s.start > m.end - m.start { s } else { m }).clone();
     let irr = bf::irregularity(&beats);
@@ -529,7 +696,12 @@ pub fn analyze(y: &[f32], sr: f64, raw: &[f64], down_raw: &[f64], signature: &st
     };
     // 3 eighths per tracker bar: the felt 6/8 beat (a dotted quarter) is three of the tracker's beats; BPM Fixer's cleaning may
     // have moved the grid to another octave, so the factor is measured
-    let mut f = if compound.is_some() { 3.0 * (median(&diff(&raw)) / median(&iv)).log2().round_ties_even().exp2() } else { 1.0 };
+    // the cleaned grid may sit on the eighths, the quarters or the dotted quarters (three eighths: BPM Fixer's own 6/8 level), so the
+    // ratio is snapped to the nearest musical one, not only to a power of two (2^round(log2(1/3)) = 1/4 made Spaceship 118.8, not 178.2)
+    // eighths in one of the tracker's beats: 1 (it followed the eighths), or 3 (dotted quarters); quarters (2) are caught by the
+    // octave below
+    let per_beat = if compound == Some(2) { 3.0 } else { 1.0 };
+    let mut f = if compound.is_some() { 3.0 / per_beat * snap_ratio(median(&diff(&raw)) / median(&iv)) } else { 1.0 };
     if compound.is_some() && main.bpm > 0.0 {
         while 3.0 * main.bpm / f < EIGHTH_MIN {
             f /= 2.0;
@@ -551,8 +723,22 @@ pub fn analyze(y: &[f32], sr: f64, raw: &[f64], down_raw: &[f64], signature: &st
     }
     let curve = Curve {
         t: beats[..beats.len() - 1].iter().step_by(step).map(|t| py_round(*t, 3)).collect(),
-        bpm: iv.iter().step_by(step).map(|p| py_round(bf::period_to_bpm(*p, &spec, BpmMode::Felt) / f, 2)).collect(),
+        bpm: iv
+            .iter()
+            .zip(&beats)
+            .step_by(step)
+            .map(|(p, t)| {
+                let g = part_factor.iter().find(|x| *t >= x.0 && *t < x.1).map_or(1.0, |x| x.2);
+                py_round(bf::period_to_bpm(*p, &spec, BpmMode::Felt) / f * g, 2)
+            })
+            .collect(),
     };
+    // the song's signature is its longest section's
+    if let Some(ms) = &main.signature {
+        if ms == "6/8" {
+            sig = "6/8";
+        }
+    }
     Ok(Analysis {
         curve,
         bpm_raw_exact: main.bpm_exact,
@@ -565,6 +751,8 @@ pub fn analyze(y: &[f32], sr: f64, raw: &[f64], down_raw: &[f64], signature: &st
         feel: if live { "live".into() } else { "grid".into() },
         beats: beats.iter().map(|t| py_round(*t, 3)).collect(),
         downbeats: dbs.iter().map(|t| py_round(*t, 3)).collect(),
+        grouping,
+        raw_bpm: 60.0 / median(&diff(&raw)),
     })
 }
 
@@ -615,6 +803,7 @@ fn half(x: f64) -> f64 {
 }
 
 fn section_text(sec: &Section, signature: &str) -> String {
+    let signature = sec.signature.as_deref().unwrap_or(signature);
     let (Some(bpm), _) = house_bpm(sec.bpm, signature) else { return "N/A".into() };
     let star = if signature != "4/4" { "*" } else { "" };
     if sec.steadiness == "live" {
@@ -647,6 +836,10 @@ fn where_(i: usize, n: usize, sec: &Section) -> String {
 }
 
 /// tempo/__init__.section_from_engine + display/bpm.bpm_display.
+fn bpm_exact_of(r: &Analysis, bpm: Option<f64>) -> Option<f64> {
+    bpm.map(|b| r.bpm_raw_exact * (b / r.bpm_raw))
+}
+
 pub fn section_from_engine(r: &Analysis) -> Tempo {
     let sig = r.signature.as_str();
     let (bpm, compound) = house_bpm(r.bpm_raw, sig);
@@ -671,7 +864,34 @@ pub fn section_from_engine(r: &Analysis) -> Tempo {
             }
         }
     }
-    if sig != "4/4" {
+    // the time signature by part (merged where neighbours agree)
+    let mut sig_secs: Vec<SigSection> = Vec::new();
+    for s in r.sections.iter().filter(|s| s.signature.is_some()) {
+        let g = s.signature.clone().unwrap();
+        match sig_secs.last_mut() {
+            Some(l) if l.sig == g => l.end = s.end,
+            _ => sig_secs.push(SigSection { start: s.start, end: s.end, sig: g }),
+        }
+    }
+    if sig_secs.len() < 2 {
+        sig_secs.clear();
+    }
+    if !sig_secs.is_empty() {
+        let n = sig_secs.len();
+        let parts: Vec<String> = sig_secs
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| x.sig != "4/4")
+            .map(|(i, x)| format!("{}-{} in {}", if i == 0 { "0:00".into() } else { mmss(x.start) }, if i + 1 == n { "end".into() } else { mmss(x.end) }, x.sig))
+            .collect();
+        let mut kinds: Vec<&str> = Vec::new();
+        for x in &sig_secs {
+            if !kinds.contains(&x.sig.as_str()) {
+                kinds.push(x.sig.as_str());
+            }
+        }
+        notes.push(format!("Played in {} ({})", kinds.join(" and "), parts.join(", ")));
+    } else if sig != "4/4" {
         notes.push(format!("Played in {sig} time signature"));
     }
     let notes: Vec<String> = notes
@@ -687,17 +907,38 @@ pub fn section_from_engine(r: &Analysis) -> Tempo {
     let (alts, alt_text) = if COMPOUND.contains(&sig) {
         let a0 = house_bpm(r.bpm_raw * 2.0, "4/4").0.unwrap_or(0.0);
         let a1 = py_round(r.bpm_raw * 1.5, 2);
-        (vec![a0, a1], vec![format!("{} (in 4/4)", fmt_bpm(a0)), format!("{} (quarter notes)", fmt_bpm(a1))])
+        // twice the dotted quarter: how the tracker writes a 12/8 song (Feel The Fiyaaaah 118.666, Mr Wrong 113.3), or a 4/4 reading
+        (vec![a0, a1], vec![format!("{} (4/4 or 12/8)", fmt_bpm(a0)), format!("{} (quarter notes)", fmt_bpm(a1))])
     } else {
         let b = bpm.unwrap_or(0.0);
         let a = vec![py_round(b / 2.0, 2), py_round(b * 2.0, 2)];
         let t = vec![fmt_bpm(a[0]), fmt_bpm(a[1])];
         (a, t)
     };
+    // the beat tracker heard the song a triplet ratio (3/2, 4/3 ...) away from BPM Fixer's cleaned level: both readings are
+    // plausible (the tracker sides with each about as often: eval/REPORT.md 1.5), so the other one is offered (Sherane: 133.5,
+    // and 89 here)
+    let triplet_alt = match (bpm_exact_of(r, bpm), COMPOUND.contains(&sig)) {
+        (Some(e), false) if r.raw_bpm > 0.0 => {
+            let q = snap_ratio(r.bpm_raw / r.raw_bpm);
+            let pow2 = (q.log2() - q.log2().round()).abs() < 1e-9;
+            if pow2 { None } else { house_bpm(e / q, "4/4").0.map(|x| np::np_round(x, 3)) }
+        }
+        _ => None,
+    };
+    let (alts, alt_text) = match triplet_alt {
+        Some(x) => {
+            let (mut a, mut t) = (alts, alt_text);
+            a.insert(0, py_round(x, 2));
+            t.insert(0, format!("{} (triplet feel)", fmt_bpm(x)));
+            (a, t)
+        }
+        None => (alts, alt_text),
+    };
     // the house rule's octave (x2, /2, x3 for compound meters) applied to the unrounded tempo
     let bpm_exact = bpm.map(|b| np::np_round(r.bpm_raw_exact * (b / r.bpm_raw), 3));
     let alternates_exact = match (bpm_exact, COMPOUND.contains(&sig)) {
-        (Some(e), false) => vec![np::np_round(e / 2.0, 3), np::np_round(e * 2.0, 3)],
+        (Some(e), false) => triplet_alt.into_iter().chain([np::np_round(e / 2.0, 3), np::np_round(e * 2.0, 3)]).collect(),
         (Some(_), true) => vec![np::np_round(r.bpm_raw_exact * 2.0 * house_factor(r.bpm_raw * 2.0), 3), np::np_round(r.bpm_raw_exact * 1.5, 3)],
         _ => vec![],
     };
@@ -710,6 +951,7 @@ pub fn section_from_engine(r: &Analysis) -> Tempo {
         signature: sig.to_string(),
         signature_conf: r.signature_conf,
         compound,
+        signature_sections: sig_secs,
         sections: r.sections.clone(),
         range,
         irregularity_pct: r.irregularity_pct,
@@ -719,5 +961,17 @@ pub fn section_from_engine(r: &Analysis) -> Tempo {
         downbeats: r.downbeats.clone(),
         curve: r.curve.clone(),
         display: TempoDisplay { bpm: display, note: if notes.is_empty() { None } else { Some(notes.join(". ")) }, alternates: alt_text },
+    }
+}
+
+#[cfg(test)]
+mod snap_tests {
+    use super::snap_ratio;
+
+    #[test]
+    fn snaps_to_musical_ratios() {
+        for (q, want) in [(0.34, 1.0 / 3.0), (0.33, 1.0 / 3.0), (0.49, 0.5), (0.66, 2.0 / 3.0), (1.02, 1.0), (1.48, 1.5), (1.34, 4.0 / 3.0), (2.9, 3.0), (3.9, 4.0), (0.76, 0.75)] {
+            assert!((snap_ratio(q) - want).abs() < 1e-9, "{q} -> {} (want {want})", snap_ratio(q));
+        }
     }
 }

@@ -89,6 +89,30 @@ fn main() {
         println!("{}", v);
         return;
     }
+    if args.first().map(|s| s.as_str()) == Some("--tempo-batch") {
+        // --tempo-batch BEATS.jsonl...: the tempo stage only, on raw beats saved by --beats (one JSON line per file), for quick
+        // re-runs of the tempo evaluation
+        for j in &args[1..] {
+            for line in std::fs::read_to_string(j).unwrap().lines().filter(|l| !l.trim().is_empty()) {
+                let v: serde_json::Value = serde_json::from_str(line).unwrap();
+                let f = v["file"].as_str().unwrap().to_string();
+                let get = |k: &str| v[k].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect::<Vec<f64>>();
+                let a = match songspec_core::audio::decode_file(Path::new(&f)) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        println!("{}", serde_json::json!({"file": f, "error": e.to_string()}));
+                        continue;
+                    }
+                };
+                let out = match songspec_core::tempo::analyze(&a.mono(), a.sr as f64, &get("beats"), &get("downbeats"), "Auto") {
+                    Ok(r) => serde_json::json!({"file": f, "tempo": songspec_core::tempo::section_from_engine(&r), "grouping": r.grouping}),
+                    Err(e) => serde_json::json!({"file": f, "error": e}),
+                };
+                println!("{out}");
+            }
+        }
+        return;
+    }
     if args.first().map(|s| s.as_str()) == Some("--meter") {
         // --meter FILE...: the beat tracker's beats per bar and the beat-grouping features (eval/meter_group.py --rust)
         let models = songspec_core::models::ModelBytes::embedded();

@@ -3307,7 +3307,7 @@ dependencies = [
 
 [[package]]
 name = "songspec-app"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "drag",
  "eframe",
@@ -3324,7 +3324,7 @@ dependencies = [
 
 [[package]]
 name = "songspec-cli"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "serde_json",
  "songspec-core",
@@ -3332,7 +3332,7 @@ dependencies = [
 
 [[package]]
 name = "songspec-core"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "cc",
  "rayon",

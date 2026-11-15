@@ -7,7 +7,7 @@ use serde::Serialize;
 use crate::centsible;
 use crate::dsp;
 use crate::notation;
-use crate::np::{self, py_round};
+use crate::np::{self, median, py_round};
 
 const DRIFT_FLAG_CENTS: f64 = 5.0;
 const FALLBACK_CI: f64 = 5.0;
@@ -65,6 +65,77 @@ pub struct DriftPoint {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct DetunePart {
+    pub start: f64,
+    pub end: f64,
+    pub cents: f64,
+}
+
+/// A step in the drift curve: parts of at least PART_MIN_POINTS drift points (about 20 s) whose tuning differs by
+/// PART_MIN_SHIFT cents or more (eval/REPORT.md 2.3).
+const PART_MIN_POINTS: usize = 4;
+const PART_MIN_SHIFT: f64 = 15.0;
+
+fn tuning_parts(drift: &[DriftPoint], main: f64) -> Vec<DetunePart> {
+    let n = drift.len();
+    if n < 2 * PART_MIN_POINTS {
+        return vec![];
+    }
+    let c: Vec<f64> = drift.iter().map(|p| wrap(p.cents - main) + main).collect();
+    fn split(c: &[f64], a: usize, b: usize, out: &mut Vec<(usize, usize)>) {
+        let seg = &c[a..b];
+        let n = seg.len();
+        if n < 2 * PART_MIN_POINTS {
+            out.push((a, b));
+            return;
+        }
+        let tot: f64 = seg.iter().sum();
+        let (mut best, mut bi) = (0.0, None);
+        let mut acc = 0.0;
+        for k in 1..n {
+            acc += seg[k - 1];
+            if k < PART_MIN_POINTS || n - k < PART_MIN_POINTS {
+                continue;
+            }
+            let g = acc * acc / k as f64 + (tot - acc) * (tot - acc) / (n - k) as f64 - tot * tot / n as f64;
+            if g > best {
+                best = g;
+                bi = Some(k);
+            }
+        }
+        match bi {
+            Some(k) if (median(&seg[..k]) - median(&seg[k..])).abs() >= PART_MIN_SHIFT => {
+                split(c, a, a + k, out);
+                split(c, a + k, b, out);
+            }
+            _ => out.push((a, b)),
+        }
+    }
+    let mut raw = Vec::new();
+    split(&c, 0, n, &mut raw);
+    let mut merged: Vec<(usize, usize)> = vec![raw[0]];
+    for &(a, b) in &raw[1..] {
+        let l = *merged.last().unwrap();
+        if (median(&c[l.0..l.1]) - median(&c[a..b])).abs() < PART_MIN_SHIFT {
+            merged.last_mut().unwrap().1 = b;
+        } else {
+            merged.push((a, b));
+        }
+    }
+    if merged.len() < 2 {
+        return vec![];
+    }
+    // each part from the end of the previous one, the first from 0 and the last to the last window's end
+    let mut out: Vec<DetunePart> = Vec::new();
+    for (i, &(a, b)) in merged.iter().enumerate() {
+        let start = if i == 0 { 0.0 } else { out[i - 1].end };
+        let end = if i + 1 == merged.len() { drift[b - 1].t + 5.0 } else { 0.5 * (drift[b - 1].t + drift[b].t) };
+        out.push(DetunePart { start: py_round(start, 1), end: py_round(end, 1), cents: py_round(median(&c[a..b]), 1) });
+    }
+    out
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct DetuneDisplay {
     pub display: String,
     pub fix: String,
@@ -81,6 +152,8 @@ pub struct Detune {
     pub drift: Vec<DriftPoint>,
     pub drift_flag: bool,
     pub drift_range_cents: Option<f64>,
+    /// the tuning by part, when it steps (a part pitched differently: Hood Politics' intro, about -30 cents against +2); [] otherwise
+    pub parts: Vec<DetunePart>,
     pub estimators: Vec<(String, Option<f64>)>,
     pub fusion: String,
     pub display: DetuneDisplay,
@@ -120,6 +193,7 @@ pub fn measure(mono: &[f32], sr: u32) -> Option<Detune> {
         drift: vec![],
         drift_flag: t.valid && t.has_drift,
         drift_range_cents: None,
+        parts: vec![],
         estimators: vec![
             ("centsible".into(), if t.valid { Some(py_round(t.cents, 2)) } else { None }),
             ("chroma120".into(), c120.map(|c| py_round(c, 2))),
@@ -141,6 +215,7 @@ pub fn add_drift(d: &mut Detune, mono: &[f32], sr: u32) {
         d.drift_flag = d.drift_flag || (hi - lo) > DRIFT_FLAG_CENTS;
         d.drift_range_cents = Some(py_round(hi - lo, 1));
     }
+    d.parts = tuning_parts(&d.drift, d.cents);
 }
 
 /// The "Plays in Bb Minor (+38.0 ¢ above Bb) ..." sentence once the key is known.

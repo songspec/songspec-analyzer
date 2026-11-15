@@ -17,6 +17,17 @@ const WINDOW_BARS: usize = 8;
 const HOP_BARS: usize = 4;
 const CHANGE_PENALTY: f64 = 24.0;
 const MIN_SECTION_BARS: f64 = 12.0;
+
+/// The section knobs, overridable for the evaluation runs (SONGSPEC_EVAL_KEY_PENALTY / _WINDOW / _HOP / _MIN_BARS); unset in the app.
+fn knob(name: &str, default: f64) -> f64 {
+    std::env::var(format!("SONGSPEC_EVAL_KEY_{name}")).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+fn window_bars() -> usize {
+    knob("WINDOW", WINDOW_BARS as f64) as usize
+}
+fn hop_bars() -> usize {
+    knob("HOP", HOP_BARS as f64) as usize
+}
 const CENTSIBLE_MODE_P: f64 = 0.5;
 const DEGREE_MODES: [&str; 7] = ["ionian", "dorian", "phrygian", "lydian", "mixolydian", "aeolian", "locrian"];
 const FUSION_MODEL: &str = include_str!("../../../service/songspec_analyzer/key/fusion_model.json");
@@ -192,13 +203,13 @@ fn centsible_mode(kd: &KeyDecision, tonic: usize, minor: bool) -> &'static str {
 
 fn window_keys(seq: &[[f64; 12]], beat_times: &[f64], downbeats: &[f64]) -> Vec<(f64, f64, usize)> {
     let downs: Vec<f64> = downbeats.iter().cloned().filter(|&d| d >= beat_times[0]).collect();
-    if downs.len() < WINDOW_BARS + 2 {
+    if downs.len() < window_bars() + 2 {
         return vec![];
     }
     let mut wins: Vec<(f64, f64, Vec<f64>)> = Vec::new();
     let mut i = 0;
-    while i + WINDOW_BARS < downs.len() {
-        let (a, z) = (downs[i], downs[i + WINDOW_BARS]);
+    while i + window_bars() < downs.len() {
+        let (a, z) = (downs[i], downs[i + window_bars()]);
         let sel: Vec<[f64; 12]> = seq.iter().zip(beat_times).filter(|(_, &t)| t >= a && t < z).map(|(r, _)| *r).collect();
         if sel.len() >= 8 {
             let g = global_chroma(&sel, Some(&vec![1.0; sel.len()]));
@@ -206,7 +217,7 @@ fn window_keys(seq: &[[f64; 12]], beat_times: &[f64], downbeats: &[f64]) -> Vec<
             let lp: Vec<f64> = (0..24).map(|k| 0.5 * ((pt[k] + 1e-6).ln() + (pa[k] + 1e-6).ln())).collect();
             wins.push((a, z, lp));
         }
-        i += HOP_BARS;
+        i += hop_bars();
     }
     if wins.is_empty() {
         return vec![];
@@ -215,7 +226,7 @@ fn window_keys(seq: &[[f64; 12]], beat_times: &[f64], downbeats: &[f64]) -> Vec<
     let mut back: Vec<Vec<usize>> = Vec::new();
     for (_, _, lp) in &wins[1..] {
         let best = np::argmax(&delta);
-        let mv = delta[best] - CHANGE_PENALTY;
+        let mv = delta[best] - knob("PENALTY", CHANGE_PENALTY);
         let mut b = vec![0usize; 24];
         let mut nd = vec![0f64; 24];
         for k in 0..24 {
@@ -272,7 +283,7 @@ fn sections_from_windows(wk: &[(f64, f64, usize)], duration: f64, bar_len: f64) 
     while changed && secs.len() > 1 {
         changed = false;
         for i in 0..secs.len() {
-            if secs[i].end - secs[i].start < MIN_SECTION_BARS * bar_len {
+            if secs[i].end - secs[i].start < knob("MIN_BARS", MIN_SECTION_BARS) * bar_len {
                 let j = if i > 0 { i - 1 } else { i + 1 };
                 let (s0, s1) = (secs[i].start, secs[i].end);
                 secs[j].start = secs[j].start.min(s0);
@@ -616,7 +627,7 @@ pub fn fused_key(inp: &KeyInputs) -> Key {
     let mut display = KeyDisplay { key: kd_key, note: kd_note, ambiguity_text: amb };
     let mut sections = Vec::new();
     let mut modulations = Vec::new();
-    if inp.downbeats.len() > WINDOW_BARS + 2 && !inp.beats.is_empty() {
+    if inp.downbeats.len() > window_bars() + 2 && !inp.beats.is_empty() {
         let bar = median(&np::diff(inp.downbeats));
         let n = inp.beats.len().min(inp.beat_chroma.len());
         let wk = window_keys(&inp.beat_chroma[..n], &inp.beats[..n], inp.downbeats);
