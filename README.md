@@ -7,7 +7,7 @@
 
 **Drop in a song. Get its key, BPM, chords, detune and borrowed chords, written the way the SongSpec tracker writes them.**
 
-![version](https://img.shields.io/badge/version-1.5.0-13265c?style=flat-square)
+![version](https://img.shields.io/badge/version-1.5.1-13265c?style=flat-square)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-13265c?style=flat-square)
 ![desktop](https://img.shields.io/badge/desktop-Windows%20%7C%20macOS-13265c?style=flat-square)
 ![web](https://img.shields.io/badge/web-HTTP%20API%20%2B%20JS%20client-13265c?style=flat-square)
@@ -55,9 +55,11 @@ and playlists. A whole album is analysed song by song. Songs are analysed one af
 play it along the chord timeline.
 
 Links are found on YouTube and downloaded with [yt-dlp](https://github.com/yt-dlp/yt-dlp), which the app fetches from its
-official release the first time you need it (you confirm first) and kept up to date. Downloaded audio stays in a temporary cache and
-is deleted when the app closes. If YouTube asks to confirm you're not a bot (after many downloads) or a song is age-restricted, turn on
-**Use my browser's YouTube login** in Add songs: yt-dlp then uses that browser's YouTube sign-in on your computer (Firefox works best).
+official release the first time you need it (you confirm first) and kept up to date. Songs are fetched one at a time with a pause
+between them; if YouTube limits them anyway, the app waits and tries again. Downloaded songs are kept (up to 2 GB) so adding one again
+doesn't download it again; **⚙ Settings** deletes them. If YouTube asks to confirm you're not a bot or a song is age-restricted, set a
+YouTube sign-in in **⚙ Settings**: Firefox, or a cookies.txt you export. No cookies are used until YouTube asks. Chrome and Edge
+can't be used on Windows (they encrypt their cookies so only the browser can read them).
 
 Build it yourself: see **[rust/README.md](rust/README.md)**. It comes down to `cargo build --release -p songspec-app`; the Mac
 .dmg is built by [.github/workflows/macos.yml](.github/workflows/macos.yml) (`tools/make_macos_app.sh`).
