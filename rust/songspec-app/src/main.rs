@@ -302,6 +302,10 @@ impl App {
         app.add_files(files);
         let links: Vec<String> = raw.iter().filter(|a| fetch::parse(a).is_some()).cloned().collect();
         app.add_links(&links);
+        // developer flag --settings: start with ⚙ Settings open (for --screenshot)
+        if raw.iter().any(|a| a == "--settings") {
+            app.settings = Some(SettingsDialog { s: fetch::settings(), downloads: fetch::downloads_size() });
+        }
         app
     }
 

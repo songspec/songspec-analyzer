@@ -462,7 +462,7 @@ fn classify(stderr: &str) -> Kind {
         Kind::RateLimit
     } else if has(&["http error 403"]) {
         Kind::Forbidden
-    } else if has(&["video unavailable", "private video", "has been removed", "not available in your country", "members-only", "this video is not available"]) {
+    } else if has(&["video unavailable", "video is unavailable", "private video", "has been removed", "not available in your country", "members-only", "this video is not available"]) {
         Kind::Unavailable
     } else if has(&["getaddrinfo", "unable to connect", "timed out", "connection reset", "name resolution", "network is unreachable", "failed to establish"]) {
         Kind::Network
@@ -939,6 +939,7 @@ mod tests {
         assert_eq!(k("[youtube] abc: Video unavailable. This content isn't available, try again later."), Kind::RateLimit);
         assert_eq!(k("unable to download video data: HTTP Error 403: Forbidden"), Kind::Forbidden);
         assert_eq!(k("[youtube] abc: Video unavailable. This video has been removed by the uploader"), Kind::Unavailable);
+        assert_eq!(k("[youtube] xxxxxxxxxxx: This video is unavailable"), Kind::Unavailable);
         assert_eq!(k("[youtube] abc: Private video. Sign in if you've been granted access to this video"), Kind::Unavailable);
         assert_eq!(k("Unable to download webpage: <urlopen error [Errno 11001] getaddrinfo failed>"), Kind::Network);
         assert_eq!(k("something new"), Kind::Other);
