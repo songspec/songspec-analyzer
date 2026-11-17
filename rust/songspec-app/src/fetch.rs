@@ -2,7 +2,10 @@
 //! (Apple's iTunes Lookup) give title, artist and length, and each song is then found on YouTube; YouTube videos and playlists are
 //! used directly. Audio comes from YouTube through yt-dlp, which is not bundled: it is downloaded from its official GitHub release
 //! on first use, after the user confirms, and checked against the release's SHA-256 list.
-//! Downloads go to a per-session temporary cache that is deleted when the app closes (and leftovers on the next start).
+//! Downloads are kept by video ID in the app's folder (2 GB at most, least recently used removed first), and which video a
+//! Spotify / Apple song was found as is remembered, so adding a song again doesn't ask YouTube again.
+//! YouTube requests go one at a time with a pause between them, back off on rate limits, and only use a sign-in (cookies) when
+//! YouTube asks for one; failures are written to yt-dlp.log in the app's folder.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -193,7 +196,7 @@ pub fn expand(link: &Link, ytdlp: Option<&Path>) -> Result<Vec<Item>, String> {
         Link::YouTube(u) => Ok(vec![Item::Video(u.clone())]),
         Link::YouTubePlaylist(u) => {
             let exe = ytdlp.ok_or("yt-dlp isn't installed")?;
-            let out = run(exe, &["--flat-playlist", "--no-warnings", "--print", "%(id)s", u])?;
+            let out = request(exe, &["--flat-playlist", "--print", "%(id)s", u], &Progress::none()).map_err(|f| f.msg)?;
             let v: Vec<Item> = out
                 .lines()
                 .map(|l| l.trim())
@@ -214,6 +217,9 @@ pub fn expand(link: &Link, ytdlp: Option<&Path>) -> Result<Vec<Item>, String> {
 /// Where the app keeps yt-dlp: %LOCALAPPDATA%\SongSpecAnalyzer on Windows, ~/Library/Application Support/SongSpecAnalyzer on macOS
 /// (never inside the .app bundle, which would break its signature).
 fn app_dir() -> PathBuf {
+    if cfg!(test) {
+        return std::env::temp_dir().join("SongSpecAnalyzer-test"); // tests never touch the real settings, log or downloads
+    }
     let base = if cfg!(windows) {
         std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
     } else if cfg!(target_os = "macos") {
@@ -268,6 +274,7 @@ pub fn install_ytdlp() -> Result<PathBuf, String> {
     }
     std::fs::create_dir_all(app_dir()).map_err(|e| e.to_string())?;
     let p = app_dir().join(YTDLP_NAME);
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner()); // not while a request is running it
     std::fs::write(&p, bytes).map_err(|e| e.to_string())?;
     #[cfg(unix)]
     {
@@ -277,10 +284,251 @@ pub fn install_ytdlp() -> Result<PathBuf, String> {
     Ok(p)
 }
 
-fn run(exe: &Path, args: &[&str]) -> Result<String, String> {
+// ------------------------------------------------------------------------------------------------ settings
+
+/// Where yt-dlp gets a YouTube sign-in from, when YouTube asks for one. None by default: no cookies are ever read.
+/// Chrome, Edge and other Chromium browsers aren't offered: on Windows they encrypt their cookies so only the browser itself can
+/// read them (yt-dlp fails with "Failed to decrypt with DPAPI", yt-dlp issue 10927).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CookieMode {
+    None,
+    Firefox,
+    /// a cookies.txt (Netscape format) the user exported and picked
+    File,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Settings {
+    pub cookies: CookieMode,
+    pub cookies_file: Option<PathBuf>,
+    /// pause between two YouTube requests, in seconds (each one varies by up to ±1 s)
+    pub gap_secs: f64,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings { cookies: CookieMode::None, cookies_file: None, gap_secs: 4.0 }
+    }
+}
+
+pub const GAP_RANGE: std::ops::RangeInclusive<f64> = 2.0..=20.0;
+
+static SETTINGS: Mutex<Option<Settings>> = Mutex::new(None);
+
+pub fn settings() -> Settings {
+    SETTINGS.lock().unwrap().clone().unwrap_or_default()
+}
+
+fn settings_path() -> PathBuf {
+    app_dir().join("settings.json")
+}
+
+pub fn set_settings(s: Settings) {
+    let mode = match s.cookies {
+        CookieMode::None => "none",
+        CookieMode::Firefox => "firefox",
+        CookieMode::File => "file",
+    };
+    let v = serde_json::json!({ "cookies": mode, "cookies_file": s.cookies_file, "request_gap_s": s.gap_secs });
+    *SETTINGS.lock().unwrap() = Some(s);
+    let _ = std::fs::create_dir_all(app_dir());
+    let _ = std::fs::write(settings_path(), v.to_string());
+}
+
+pub fn load_settings() {
+    let mut s = Settings::default();
+    if let Some(v) = std::fs::read_to_string(settings_path()).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
+        s.cookies = match v["cookies"].as_str() {
+            Some("firefox") => CookieMode::Firefox,
+            Some("file") => CookieMode::File,
+            // 1.5.0 kept a browser name: only Firefox carries over (Chromium browsers fail on Windows)
+            None if v["cookies_from_browser"] == "firefox" => CookieMode::Firefox,
+            _ => CookieMode::None,
+        };
+        s.cookies_file = v["cookies_file"].as_str().map(PathBuf::from);
+        if let Some(g) = v["request_gap_s"].as_f64() {
+            s.gap_secs = g.clamp(*GAP_RANGE.start(), *GAP_RANGE.end());
+        }
+    }
+    *SETTINGS.lock().unwrap() = Some(s);
+}
+
+/// Is there a Firefox profile yt-dlp could read?
+pub fn firefox_installed() -> bool {
+    let home = |v: &str| std::env::var_os(v).map(PathBuf::from);
+    let dir = if cfg!(windows) {
+        home("APPDATA").map(|d| d.join("Mozilla/Firefox/Profiles"))
+    } else if cfg!(target_os = "macos") {
+        home("HOME").map(|d| d.join("Library/Application Support/Firefox/Profiles"))
+    } else {
+        home("HOME").map(|d| d.join(".mozilla/firefox"))
+    };
+    dir.is_some_and(|d| d.is_dir())
+}
+
+#[derive(Debug, Clone)]
+enum Cookie {
+    File(PathBuf),
+    Firefox,
+}
+
+impl Cookie {
+    fn name(&self) -> &'static str {
+        match self {
+            Cookie::File(_) => "cookies.txt",
+            Cookie::Firefox => "Firefox",
+        }
+    }
+}
+
+/// The sign-ins to try, in order, once YouTube asks for one: the picked cookies.txt, then Firefox; none when the setting is None.
+fn cookie_sources() -> Vec<Cookie> {
+    let s = settings();
+    let mut v = vec![];
+    if s.cookies == CookieMode::File {
+        if let Some(p) = s.cookies_file.filter(|p| p.is_file()) {
+            v.push(Cookie::File(p));
+        }
+    }
+    if s.cookies != CookieMode::None && firefox_installed() {
+        v.push(Cookie::Firefox);
+    }
+    v
+}
+
+// ------------------------------------------------------------------------------------------------ running yt-dlp
+
+/// What a request shows while it waits ("rate limited, retrying in 30s") and whether to give up (the queue was cleared).
+pub struct Progress<'a> {
+    pub status: &'a dyn Fn(String),
+    pub cancelled: &'a dyn Fn() -> bool,
+}
+
+fn no_status(_: String) {}
+fn never() -> bool {
+    false
+}
+
+impl Progress<'static> {
+    pub fn none() -> Self {
+        Progress { status: &no_status, cancelled: &never }
+    }
+}
+
+/// A song that couldn't be fetched: a short message for the queue, and yt-dlp's own output for the details.
+#[derive(Debug, Clone, Default)]
+pub struct Fail {
+    pub msg: String,
+    pub raw: String,
+    pub url: Option<String>,
+}
+
+pub const CLEARED: &str = "cleared";
+
+impl Fail {
+    fn new(msg: impl Into<String>) -> Self {
+        Fail { msg: msg.into(), ..Default::default() }
+    }
+    pub fn cleared(&self) -> bool {
+        self.msg == CLEARED
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Kind {
+    /// the sign-in (cookies) couldn't be read: DPAPI, a locked or missing database, a bad cookies.txt
+    Cookies,
+    Age,
+    /// "Sign in to confirm you're not a bot"
+    Bot,
+    RateLimit,
+    Forbidden,
+    Unavailable,
+    Network,
+    Other,
+}
+
+fn classify(stderr: &str) -> Kind {
+    let errs: Vec<&str> = stderr.lines().filter(|l| l.contains("ERROR")).collect();
+    let text = if errs.is_empty() { stderr.to_lowercase() } else { errs.join("\n").to_lowercase() };
+    let has = |p: &[&str]| p.iter().any(|x| text.contains(x));
+    if has(&["dpapi", "failed to decrypt", "cookies database", "could not copy", "netscape format", "failed to load cookies", "keyring", "cookie file"]) {
+        Kind::Cookies
+    } else if has(&["confirm your age", "age-restricted", "age restricted", "inappropriate for some users"]) {
+        Kind::Age
+    } else if has(&["not a bot", "sign in to confirm", "please sign in", "login required"]) {
+        Kind::Bot
+    } else if has(&["http error 429", "too many requests", "rate-limit", "rate limit", "try again later"]) {
+        Kind::RateLimit
+    } else if has(&["http error 403"]) {
+        Kind::Forbidden
+    } else if has(&["video unavailable", "private video", "has been removed", "not available in your country", "members-only", "this video is not available"]) {
+        Kind::Unavailable
+    } else if has(&["getaddrinfo", "unable to connect", "timed out", "connection reset", "name resolution", "network is unreachable", "failed to establish"]) {
+        Kind::Network
+    } else {
+        Kind::Other
+    }
+}
+
+const DROP: &str = "or drop the audio file in directly";
+
+fn message(kind: Kind, stderr: &str, cookies_unreadable: bool) -> String {
+    let m = match kind {
+        Kind::Bot => format!("YouTube blocked this request. Try again later, set cookies in Settings, {DROP}."),
+        Kind::RateLimit => format!("YouTube is limiting requests from this connection. Try again later (↻ Retry failed), {DROP}."),
+        Kind::Age => format!("This video is age-restricted: YouTube only plays it to a signed-in account. Set cookies in Settings, {DROP}."),
+        Kind::Forbidden => format!("YouTube refused the download (HTTP 403), even after updating yt-dlp. Try again later, {DROP}."),
+        Kind::Unavailable => "This video isn't available (removed, private, or blocked where you are).".into(),
+        Kind::Network => "Couldn't reach YouTube. Check the internet connection and try again.".into(),
+        Kind::Cookies | Kind::Other => {
+            let line = stderr.lines().filter(|l| l.contains("ERROR")).last().or(stderr.lines().last()).unwrap_or("no output");
+            let short: String = line.trim_start_matches("ERROR:").trim().chars().take(160).collect();
+            format!("yt-dlp couldn't get this song: {short}")
+        }
+    };
+    if cookies_unreadable && matches!(kind, Kind::Bot | Kind::Age) {
+        format!("{m} (The cookies set in Settings couldn't be read: see the log.)")
+    } else {
+        m
+    }
+}
+
+/// One yt-dlp request at a time, from any thread (the queue, links being read, an update replacing the file).
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+/// When the last request ended: the next one waits the pause from Settings, ±1 s.
+static LAST_REQUEST: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn pause() -> Duration {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+    let jitter = (nanos % 2001) as f64 / 1000.0 - 1.0;
+    Duration::from_secs_f64((settings().gap_secs + jitter).max(1.0))
+}
+
+struct Out {
+    ok: bool,
+    stdout: String,
+    stderr: String,
+}
+
+fn exec(exe: &Path, cookie: Option<&Cookie>, args: &[&str]) -> Out {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let wait = LAST_REQUEST.lock().unwrap().map(|t| pause().saturating_sub(t.elapsed())).unwrap_or_default();
+    std::thread::sleep(wait);
     let mut c = Command::new(exe);
-    if let Some(b) = cookies_from() {
-        c.args(["--cookies-from-browser", &b]);
+    // yt-dlp writes the cookies back into a --cookies file when it ends: it gets a copy, deleted afterwards
+    let copy = std::env::temp_dir().join(format!("songspec-cookies-{}.txt", std::process::id()));
+    match cookie {
+        Some(Cookie::File(p)) => {
+            if let Err(e) = std::fs::copy(p, &copy) {
+                return Out { ok: false, stdout: String::new(), stderr: format!("ERROR: failed to load cookies from {} ({e})", p.display()) };
+            }
+            c.arg("--cookies").arg(&copy);
+        }
+        Some(Cookie::Firefox) => {
+            c.args(["--cookies-from-browser", "firefox"]);
+        }
+        None => {}
     }
     c.args(args);
     #[cfg(windows)]
@@ -288,83 +536,182 @@ fn run(exe: &Path, args: &[&str]) -> Result<String, String> {
         use std::os::windows::process::CommandExt;
         c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: no console flashing up
     }
-    let out = c.output().map_err(|e| format!("couldn't run yt-dlp ({e})"))?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        let last = err.lines().filter(|l| l.contains("ERROR")).last().unwrap_or(err.lines().last().unwrap_or("")).to_string();
-        return Err(explain(last.trim()));
+    let out = match c.output() {
+        Ok(o) => Out { ok: o.status.success(), stdout: String::from_utf8_lossy(&o.stdout).into(), stderr: String::from_utf8_lossy(&o.stderr).into() },
+        Err(e) => Out { ok: false, stdout: String::new(), stderr: format!("ERROR: couldn't run yt-dlp ({e})") },
+    };
+    if matches!(cookie, Some(Cookie::File(_))) {
+        let _ = std::fs::remove_file(&copy);
     }
-    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    *LAST_REQUEST.lock().unwrap() = Some(Instant::now());
+    out
 }
 
-/// yt-dlp's error line -> what happened and what to do, in a sentence (its own lines run to several hundred characters).
-pub fn explain(line: &str) -> String {
-    let l = line.to_lowercase();
-    let browser = cookies_from();
-    if l.contains("not a bot") {
-        return match browser {
-            None => "YouTube wants to confirm you're not a bot (it asks after many downloads from one connection). Wait a while and                      try again, or turn on \"Use my browser's YouTube login\" in Add songs."
-                .into(),
-            Some(b) => format!("YouTube wants to confirm you're not a bot, even with {}'s login. Open YouTube in {} once (signed in), then try again.", title(&b), title(&b)),
-        };
+/// Waits after a rate limit or bot check; one more try after each.
+const BACKOFF_S: [u64; 4] = if cfg!(test) { [1, 1, 1, 1] } else { [30, 60, 120, 120] };
+
+/// Run a yt-dlp request the careful way:
+/// - no cookies first;
+/// - on a bot check or age gate, the sign-ins from Settings in order (one that can't be read is skipped, never fatal);
+/// - on a rate limit or bot check, wait and try again (30 s, 60 s, 120 s, 120 s), showing the countdown;
+/// - on HTTP 403, update yt-dlp once and try again.
+fn request(exe: &Path, args: &[&str], p: &Progress) -> Result<String, Fail> {
+    let mut updated = false;
+    let mut waits = BACKOFF_S.iter();
+    loop {
+        if (p.cancelled)() {
+            return Err(Fail::new(CLEARED));
+        }
+        let mut out = exec(exe, None, args);
+        if out.ok {
+            return Ok(out.stdout);
+        }
+        let mut kind = classify(&out.stderr);
+        log_failure(args, None, &out.stderr);
+        let mut cookies_unreadable = false;
+        if matches!(kind, Kind::Bot | Kind::Age) {
+            for src in cookie_sources() {
+                if (p.cancelled)() {
+                    return Err(Fail::new(CLEARED));
+                }
+                (p.status)(format!("YouTube asked for a sign-in: trying {}…", src.name()));
+                let o = exec(exe, Some(&src), args);
+                if o.ok {
+                    return Ok(o.stdout);
+                }
+                let k = classify(&o.stderr);
+                log_failure(args, Some(&src), &o.stderr);
+                if k == Kind::Cookies {
+                    cookies_unreadable = true; // skip it: on to the next source, or no cookies
+                    continue;
+                }
+                (out, kind) = (o, k);
+                if !matches!(k, Kind::Bot | Kind::Age) {
+                    break;
+                }
+            }
+        }
+        match kind {
+            Kind::Forbidden if !updated => {
+                updated = true;
+                (p.status)("YouTube refused (HTTP 403): updating yt-dlp…".into());
+                if refresh_ytdlp(true).unwrap_or(false) {
+                    continue;
+                }
+            }
+            Kind::Bot | Kind::RateLimit => {
+                if let Some(&w) = waits.next() {
+                    log(&format!("rate limited / bot check: waiting {w} s"));
+                    for left in (1..=w).rev() {
+                        if (p.cancelled)() {
+                            return Err(Fail::new(CLEARED));
+                        }
+                        (p.status)(format!("rate limited, retrying in {left}s"));
+                        std::thread::sleep(Duration::from_secs(1));
+                    }
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        return Err(Fail { msg: message(kind, &out.stderr, cookies_unreadable), raw: out.stderr, url: None });
     }
-    if l.contains("confirm your age") || l.contains("inappropriate for some") || l.contains("age-restricted") || l.contains("age restricted") {
-        return "This video is age-restricted: YouTube only plays it to a signed-in account. Turn on \"Use my browser's YouTube login\" in                 Add songs (with a browser where you're signed in to YouTube)."
-            .into();
+}
+
+// ------------------------------------------------------------------------------------------------ yt-dlp's version, the log
+
+static VERSION: Mutex<Option<String>> = Mutex::new(None);
+
+/// The version of the yt-dlp in use ("2026.10.26"), asked once and remembered.
+pub fn ytdlp_version() -> Option<String> {
+    if let Some(v) = VERSION.lock().unwrap().clone() {
+        return Some(v);
     }
-    if l.contains("cookie") && (l.contains("could not copy") || l.contains("decrypt") || l.contains("permission") || l.contains("locked")) {
-        return format!(
-            "yt-dlp couldn't read {}'s YouTube login. Close that browser and try again; Chrome and Edge on Windows may still refuse              (they lock and encrypt their cookies), Firefox works.",
-            browser.as_deref().map(title).unwrap_or_else(|| "the browser".into())
-        );
+    let exe = ytdlp()?;
+    let mut c = Command::new(&exe);
+    c.arg("--version");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000);
     }
-    if l.contains("http error 403") {
-        return "YouTube refused the download (HTTP 403). yt-dlp was updated and it was tried again; if it keeps happening, wait a while                 or turn on \"Use my browser's YouTube login\" in Add songs."
-            .into();
-    }
-    let short: String = line.trim_start_matches("ERROR:").trim().chars().take(220).collect();
-    format!("yt-dlp: {short}")
+    let o = c.output().ok().filter(|o| o.status.success())?;
+    let v = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    *VERSION.lock().unwrap() = Some(v.clone());
+    Some(v)
 }
 
-fn title(b: &str) -> String {
-    let mut c = b.chars();
-    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+/// The version if it is already known (never runs yt-dlp: for drawing the window).
+pub fn known_ytdlp_version() -> Option<String> {
+    VERSION.lock().unwrap().clone()
 }
 
-// ------------------------------------------------------------------------- YouTube's sign-in, updates, pacing
-
-/// Browsers yt-dlp can take the YouTube sign-in (cookies) from.
-pub const BROWSERS: &[&str] = if cfg!(target_os = "macos") {
-    &["firefox", "safari", "chrome", "edge", "brave", "opera", "vivaldi"]
-} else {
-    &["firefox", "chrome", "edge", "brave", "opera", "vivaldi"]
-};
-
-static COOKIES_FROM: Mutex<Option<String>> = Mutex::new(None);
-
-/// The browser whose YouTube sign-in yt-dlp uses (None: none, the default). It answers YouTube's "confirm you're not a bot" and
-/// lets age-restricted videos play; the cookies stay on this computer (yt-dlp reads them and talks to YouTube only).
-pub fn cookies_from() -> Option<String> {
-    COOKIES_FROM.lock().unwrap().clone()
+fn forget_version() {
+    *VERSION.lock().unwrap() = None;
 }
 
-fn settings_path() -> PathBuf {
-    app_dir().join("settings.json")
-}
-
-pub fn set_cookies_from(b: Option<String>) {
-    *COOKIES_FROM.lock().unwrap() = b.clone();
-    let _ = std::fs::create_dir_all(app_dir());
-    let _ = std::fs::write(settings_path(), serde_json::json!({ "cookies_from_browser": b }).to_string());
-}
-
-pub fn load_settings() {
-    if let Ok(s) = std::fs::read_to_string(settings_path()) {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
-            let b = v["cookies_from_browser"].as_str().filter(|b| BROWSERS.contains(b)).map(str::to_string);
-            *COOKIES_FROM.lock().unwrap() = b;
+/// "Update yt-dlp": the app's own copy is fetched again from the official release; a copy installed elsewhere updates itself
+/// (yt-dlp -U). -> the version now in use.
+pub fn update_ytdlp() -> Result<String, String> {
+    let ours = app_dir().join(YTDLP_NAME);
+    match ytdlp() {
+        Some(p) if p != ours => {
+            let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+            let o = Command::new(&p).arg("-U").output().map_err(|e| format!("couldn't run yt-dlp ({e})"))?;
+            let text = String::from_utf8_lossy(&o.stdout).to_string() + &String::from_utf8_lossy(&o.stderr);
+            log(&format!("yt-dlp -U ({}):\n{text}", p.display()));
+            if !o.status.success() {
+                return Err(text.lines().last().unwrap_or("yt-dlp -U failed").trim().to_string());
+            }
+        }
+        _ => {
+            install_ytdlp()?;
         }
     }
+    forget_version();
+    let v = ytdlp_version().ok_or("the updated yt-dlp doesn't run")?;
+    log(&format!("yt-dlp updated: now {v}"));
+    Ok(v)
+}
+
+pub fn log_path() -> PathBuf {
+    app_dir().join("yt-dlp.log")
+}
+
+/// Append to the log (yt-dlp.log in the app's folder; past 1 MB it moves to yt-dlp.old.log).
+pub fn log(text: &str) {
+    use std::io::Write;
+    let p = log_path();
+    if std::fs::metadata(&p).is_ok_and(|m| m.len() > 1 << 20) {
+        let _ = std::fs::rename(&p, app_dir().join("yt-dlp.old.log"));
+    }
+    let _ = std::fs::create_dir_all(app_dir());
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+        let _ = writeln!(f, "[{}] {}", utc_now(), text.trim_end());
+    }
+}
+
+fn log_failure(args: &[&str], cookie: Option<&Cookie>, stderr: &str) {
+    let v = ytdlp_version().unwrap_or_else(|| "?".into());
+    let c = cookie.map(Cookie::name).unwrap_or("none");
+    log(&format!("FAILED  yt-dlp {v}  cookies: {c}  args: {}\n{}", args.join(" "), stderr.trim_end()));
+}
+
+/// "2026-11-16 14:03:07 UTC" without a date crate.
+fn utc_now() -> String {
+    let s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+    let (days, rem) = (s.div_euclid(86400), s.rem_euclid(86400));
+    // civil-from-days (Howard Hinnant)
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02} UTC", rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
 /// YouTube changes often and older yt-dlp copies start failing (HTTP 403, "unable to download"): the copy this app installed is
@@ -381,24 +728,107 @@ pub fn refresh_ytdlp(force: bool) -> Result<bool, String> {
     if !force && age < YTDLP_MAX_AGE {
         return Ok(false);
     }
-    install_ytdlp().map(|_| true)
+    let r = install_ytdlp().map(|_| true);
+    forget_version();
+    log(&format!("yt-dlp refreshed ({}): {}", if force { "after HTTP 403" } else { "older than 3 days" }, match &r {
+        Ok(_) => format!("now {}", ytdlp_version().unwrap_or_default()),
+        Err(e) => format!("failed: {e}"),
+    }));
+    r
 }
 
-/// At most one YouTube download every few seconds: a quick run of downloads (a whole album) is what makes YouTube ask for a sign-in.
-const DOWNLOAD_GAP: Duration = Duration::from_secs(4);
-static LAST_DOWNLOAD: Mutex<Option<Instant>> = Mutex::new(None);
+// ------------------------------------------------------------------------------------------------ finding and downloading
 
-fn pace() {
-    let wait = LAST_DOWNLOAD.lock().unwrap().map(|t| DOWNLOAD_GAP.saturating_sub(t.elapsed())).unwrap_or_default();
-    if !wait.is_zero() {
-        std::thread::sleep(wait);
+/// Downloaded songs are kept here by YouTube video ID (up to DOWNLOADS_MAX, the least recently used go first), so adding a
+/// song again never asks YouTube again.
+pub fn downloads_dir() -> PathBuf {
+    app_dir().join("downloads")
+}
+
+const DOWNLOADS_MAX: u64 = 2 << 30;
+
+/// "Artist - Title | length" -> the video found for it.
+static LOOKUPS: Mutex<Option<std::collections::HashMap<String, String>>> = Mutex::new(None);
+
+fn lookups_path() -> PathBuf {
+    app_dir().join("lookups.json")
+}
+
+fn lookup_key(t: &Track) -> String {
+    format!("{} | {}", t.label().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" "), t.duration.map(|d| d.round() as i64).unwrap_or(-1))
+}
+
+fn lookup(key: &str) -> Option<String> {
+    let mut g = LOOKUPS.lock().unwrap();
+    let m = g.get_or_insert_with(|| std::fs::read_to_string(lookups_path()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default());
+    m.get(key).cloned()
+}
+
+fn remember(key: String, id: String) {
+    let mut g = LOOKUPS.lock().unwrap();
+    let m = g.get_or_insert_with(Default::default);
+    m.insert(key, id);
+    let _ = std::fs::create_dir_all(app_dir());
+    let _ = std::fs::write(lookups_path(), serde_json::to_string(m).unwrap_or_default());
+}
+
+pub fn video_id(url: &str) -> Option<String> {
+    query_param(url, "v")
+}
+
+pub fn watch_url(id: &str) -> String {
+    format!("https://www.youtube.com/watch?v={id}")
+}
+
+/// A finished download of this video: (file, title). Only one with its title file counts (it's written last).
+fn cached(id: &str) -> Option<(PathBuf, String)> {
+    let dir = downloads_dir();
+    let title = std::fs::read_to_string(dir.join(format!("{id}.title"))).ok()?;
+    let file = std::fs::read_dir(&dir).ok()?.flatten().map(|e| e.path()).find(|p| {
+        p.file_stem().is_some_and(|s| s == id) && p.extension().is_some_and(|e| e != "title" && e != "part" && e != "ytdl")
+    })?;
+    if let Ok(f) = std::fs::OpenOptions::new().append(true).open(&file) {
+        let _ = f.set_modified(std::time::SystemTime::now()); // recently used: kept longest
     }
-    *LAST_DOWNLOAD.lock().unwrap() = Some(Instant::now());
+    Some((file, title.trim().to_string()))
 }
 
-pub fn find_on_youtube(exe: &Path, t: &Track) -> Result<String, String> {
+/// Size of the kept downloads, in bytes.
+pub fn downloads_size() -> u64 {
+    std::fs::read_dir(downloads_dir()).map(|rd| rd.flatten().filter_map(|e| e.metadata().ok()).map(|m| m.len()).sum()).unwrap_or(0)
+}
+
+pub fn clear_downloads() {
+    let _ = std::fs::remove_dir_all(downloads_dir());
+}
+
+/// Keep the downloads under DOWNLOADS_MAX: least recently used first.
+fn prune() {
+    let Ok(rd) = std::fs::read_dir(downloads_dir()) else { return };
+    let mut files: Vec<(std::time::SystemTime, u64, PathBuf)> = rd
+        .flatten()
+        .filter(|e| e.path().extension().is_none_or(|x| x != "title"))
+        .filter_map(|e| e.metadata().ok().map(|m| (m.modified().unwrap_or(std::time::UNIX_EPOCH), m.len(), e.path())))
+        .collect();
+    files.sort();
+    let mut total: u64 = files.iter().map(|f| f.1).sum();
+    for (_, len, p) in files {
+        if total <= DOWNLOADS_MAX {
+            break;
+        }
+        let _ = std::fs::remove_file(&p);
+        let _ = std::fs::remove_file(p.with_extension("title"));
+        total -= len;
+    }
+}
+
+pub fn find_on_youtube(exe: &Path, t: &Track, p: &Progress) -> Result<String, Fail> {
+    let key = lookup_key(t);
+    if let Some(id) = lookup(&key) {
+        return Ok(watch_url(&id));
+    }
     let q = format!("ytsearch5:{} audio", t.label());
-    let out = run(exe, &["--flat-playlist", "--no-warnings", "--print", "%(id)s\t%(duration)s", &q])?;
+    let out = request(exe, &["--flat-playlist", "--print", "%(id)s\t%(duration)s", &q], p)?;
     let hits: Vec<(String, Option<f64>)> = out
         .lines()
         .filter_map(|l| {
@@ -416,39 +846,42 @@ pub fn find_on_youtube(exe: &Path, t: &Track) -> Result<String, String> {
             .or(hits.first()),
         None => hits.first(),
     };
-    best.map(|h| format!("https://www.youtube.com/watch?v={}", h.0)).ok_or_else(|| "nothing found on YouTube".into())
+    let id = best.map(|h| h.0.clone()).ok_or_else(|| Fail::new("Nothing was found on YouTube for this song."))?;
+    remember(key, id.clone());
+    Ok(watch_url(&id))
 }
 
-/// Download a YouTube video's audio (M4A / AAC, which the analyzer decodes without ffmpeg) into `dir`. -> (file, video title).
-pub fn download(exe: &Path, url: &str, dir: &Path) -> Result<(PathBuf, String), String> {
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    pace();
-    match download_once(exe, url, dir) {
-        // an out-of-date yt-dlp is the usual cause: update it and try once more
-        Err(e) if e.contains("HTTP 403") && refresh_ytdlp(true).unwrap_or(false) => download_once(exe, url, dir),
-        r => r,
+/// A YouTube video's audio only (M4A / AAC, which the analyzer decodes without ffmpeg; no video is downloaded). The whole track
+/// is needed: the analysis reads the song from start to end. -> (file, video title). A video downloaded before is used again.
+pub fn download(exe: &Path, url: &str, p: &Progress) -> Result<(PathBuf, String), Fail> {
+    if let Some(hit) = video_id(url).and_then(|id| cached(&id)) {
+        return Ok(hit);
     }
-}
-
-fn download_once(exe: &Path, url: &str, dir: &Path) -> Result<(PathBuf, String), String> {
+    let dir = downloads_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| Fail::new(e.to_string()))?;
     let tmpl = dir.join("%(id)s.%(ext)s");
-    let out = run(
+    let out = request(
         exe,
         &[
             "-f", "140/bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]",
-            "--no-playlist", "--no-warnings", "--no-part", "--no-mtime",
+            "--no-playlist", "--no-mtime",
+            "--sleep-requests", "1",
             "-o", &tmpl.to_string_lossy(),
-            "--print", "after_move:%(filepath)s\t%(title)s",
+            "--print", "after_move:%(id)s\t%(filepath)s\t%(title)s",
             url,
         ],
+        p,
     )?;
-    let line = out.lines().rev().find(|l| l.contains('\t')).ok_or("yt-dlp didn't report a file")?;
-    let (path, title) = line.split_once('\t').unwrap();
-    let p = PathBuf::from(path.trim());
-    if !p.is_file() {
-        return Err("the download didn't produce a file".into());
+    let line = out.lines().rev().find(|l| l.matches('\t').count() >= 2).ok_or_else(|| Fail::new("yt-dlp didn't report a file"))?;
+    let mut parts = line.splitn(3, '\t');
+    let (id, path, title) = (parts.next().unwrap().trim(), parts.next().unwrap().trim(), parts.next().unwrap().trim());
+    let file = PathBuf::from(path);
+    if !file.is_file() {
+        return Err(Fail::new("the download didn't produce a file"));
     }
-    Ok((p, title.trim().to_string()))
+    let _ = std::fs::write(dir.join(format!("{id}.title")), title);
+    prune();
+    Ok((file, title.to_string()))
 }
 
 // ------------------------------------------------------------------------------------------------ the temporary cache
@@ -489,6 +922,97 @@ mod tests {
         assert_eq!(parse("https://www.youtube.com/playlist?list=PL1"), Some(Link::YouTubePlaylist("https://www.youtube.com/playlist?list=PL1".into())));
         assert_eq!(parse("https://example.com/song"), None);
     }
+
+    #[test]
+    fn errors() {
+        let k = |s: &str| classify(&format!("WARNING: something\nERROR: {s}"));
+        assert_eq!(k("Failed to decrypt with DPAPI. See  https://github.com/yt-dlp/yt-dlp/issues/10927  for more info"), Kind::Cookies);
+        assert_eq!(k("could not find chrome cookies database in \"C:\\Users\\x\\AppData\\Local\\Google\\Chrome\\User Data\""), Kind::Cookies);
+        assert_eq!(k("Could not copy Chrome cookie database. See  https://github.com/yt-dlp/yt-dlp/issues/7271  for more info"), Kind::Cookies);
+        assert_eq!(k("'cookies.txt' does not look like a Netscape format cookies file"), Kind::Cookies);
+        assert_eq!(
+            k("[youtube] 4NRXx6U8ABQ: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies"),
+            Kind::Bot
+        );
+        assert_eq!(k("[youtube] abc: Sign in to confirm your age. This video may be inappropriate for some users. Use --cookies-from-browser or --cookies"), Kind::Age);
+        assert_eq!(k("unable to download video data: HTTP Error 429: Too Many Requests"), Kind::RateLimit);
+        assert_eq!(k("[youtube] abc: Video unavailable. This content isn't available, try again later."), Kind::RateLimit);
+        assert_eq!(k("unable to download video data: HTTP Error 403: Forbidden"), Kind::Forbidden);
+        assert_eq!(k("[youtube] abc: Video unavailable. This video has been removed by the uploader"), Kind::Unavailable);
+        assert_eq!(k("[youtube] abc: Private video. Sign in if you've been granted access to this video"), Kind::Unavailable);
+        assert_eq!(k("Unable to download webpage: <urlopen error [Errno 11001] getaddrinfo failed>"), Kind::Network);
+        assert_eq!(k("something new"), Kind::Other);
+        // the short message never shows yt-dlp's raw line for a block
+        assert!(message(Kind::Bot, "", false).starts_with("YouTube blocked this request."));
+        assert!(message(Kind::Bot, "", true).contains("couldn't be read"));
+    }
+
+    #[test]
+    fn old_settings_drop_chromium_browsers() {
+        assert_eq!(utc_now().len(), "2026-11-16 14:03:07 UTC".len());
+        let _ = std::fs::create_dir_all(app_dir());
+        for (b, want) in [("edge", CookieMode::None), ("chrome", CookieMode::None), ("firefox", CookieMode::Firefox)] {
+            std::fs::write(settings_path(), format!("{{\"cookies_from_browser\":\"{b}\"}}")).unwrap();
+            let _guard = SETTINGS_TEST.lock().unwrap();
+            load_settings();
+            assert_eq!(settings().cookies, want, "{b}");
+            assert_eq!(settings().gap_secs, 4.0);
+        }
+        std::fs::remove_file(settings_path()).unwrap();
+        load_settings();
+    }
+
+    static SETTINGS_TEST: Mutex<()> = Mutex::new(());
+
+    /// A stand-in yt-dlp: any cookies -> the DPAPI error; the first request without -> the bot check; then it works. The song must
+    /// still come through: unreadable cookies are skipped, the bot check is waited out.
+    #[test]
+    fn unreadable_cookies_never_fail_a_song() {
+        let dir = std::env::temp_dir().join(format!("songspec-fake-ytdlp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        #[cfg(windows)]
+        let exe = {
+            let p = dir.join("fake.cmd");
+            std::fs::write(
+                &p,
+                "@echo off\r\n\
+                 echo %* | findstr /C:\"--cookies\" >nul && (echo ERROR: Failed to decrypt with DPAPI. See https://github.com/yt-dlp/yt-dlp/issues/10927 1>&2& exit /b 1)\r\n\
+                 if not exist \"%~dp0blocked\" (type nul > \"%~dp0blocked\"& echo ERROR: [youtube] abc: Sign in to confirm you're not a bot. 1>&2& exit /b 1)\r\n\
+                 echo abc\tdone\r\n",
+            )
+            .unwrap();
+            p
+        };
+        #[cfg(unix)]
+        let exe = {
+            use std::os::unix::fs::PermissionsExt;
+            let p = dir.join("fake.sh");
+            std::fs::write(
+                &p,
+                "#!/bin/sh\ncase \"$*\" in *--cookies*) echo 'ERROR: Failed to decrypt with DPAPI.' >&2; exit 1;; esac\n\
+                 d=$(dirname \"$0\"); if [ ! -e \"$d/blocked\" ]; then touch \"$d/blocked\"; echo \"ERROR: [youtube] abc: Sign in to confirm you're not a bot.\" >&2; exit 1; fi\n\
+                 printf 'abc\\tdone\\n'\n",
+            )
+            .unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            p
+        };
+        let cookies = dir.join("cookies.txt");
+        std::fs::write(&cookies, "# Netscape HTTP Cookie File\n").unwrap();
+        let _guard = SETTINGS_TEST.lock().unwrap();
+        *SETTINGS.lock().unwrap() = Some(Settings { cookies: CookieMode::File, cookies_file: Some(cookies), gap_secs: 2.0 });
+        let seen = Mutex::new(vec![]);
+        let status = |s: String| seen.lock().unwrap().push(s);
+        let p = Progress { status: &status, cancelled: &never };
+        let out = request(&exe, &["--print", "id", "https://www.youtube.com/watch?v=abc"], &p).expect("the song came through");
+        assert!(out.contains("done"));
+        let seen = seen.into_inner().unwrap();
+        assert!(seen.iter().any(|s| s.contains("trying cookies.txt")), "{seen:?}");
+        assert!(seen.iter().any(|s| s.starts_with("rate limited, retrying in")), "{seen:?}");
+        *SETTINGS.lock().unwrap() = None;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]
@@ -514,5 +1038,33 @@ mod net_tests {
             println!("{url}\n   {} songs, first: {first}", items.len());
             assert!(items.len() >= min);
         }
+    }
+
+    /// A queue of an album's songs, one after another with no cookies, through the real yt-dlp the app installed:
+    /// cargo test -p songspec-app back_to_back -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn back_to_back() {
+        let exe = std::env::var_os("SONGSPEC_YTDLP").map(PathBuf::from).expect("SONGSPEC_YTDLP = the yt-dlp to use");
+        let n: usize = std::env::var("SONGSPEC_SONGS").ok().and_then(|v| v.parse().ok()).unwrap_or(12);
+        let items = expand(&parse("https://open.spotify.com/album/4yP0hdKOZPNshxUOjY0cZj").unwrap(), None).unwrap();
+        let t0 = Instant::now();
+        let mut failed = 0;
+        for it in items.iter().take(n) {
+            let Item::Song(t) = it else { continue };
+            let s = Instant::now();
+            let status = |m: String| println!("      {m}");
+            let p = Progress { status: &status, cancelled: &never };
+            let r = find_on_youtube(&exe, t, &p).and_then(|u| download(&exe, &u, &p).map(|(f, title)| format!("{title} ({} kB)", std::fs::metadata(f).map(|m| m.len() / 1000).unwrap_or(0))));
+            match r {
+                Ok(m) => println!("ok   {:5.1}s  {} -> {m}", s.elapsed().as_secs_f64(), t.label()),
+                Err(f) => {
+                    failed += 1;
+                    println!("FAIL {:5.1}s  {}: {}\n{}", s.elapsed().as_secs_f64(), t.label(), f.msg, f.raw);
+                }
+            }
+        }
+        println!("{} songs in {:.0} s, {failed} failed", n.min(items.len()), t0.elapsed().as_secs_f64());
+        assert_eq!(failed, 0);
     }
 }

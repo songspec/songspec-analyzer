@@ -31,7 +31,7 @@ const BAD: Color32 = Color32::from_rgb(0xef, 0x53, 0x50);
 #[derive(Clone)]
 enum Status {
     Queued,
-    Running(&'static str),
+    Running(String),
     Done,
     Failed(String),
 }
@@ -51,6 +51,8 @@ struct Song {
     name: String,
     status: Status,
     result: Option<Arc<Analysis>>,
+    /// why a song from a link couldn't be fetched: yt-dlp's output and the video, for the details
+    fail: Option<fetch::Fail>,
 }
 
 struct Shared {
@@ -87,6 +89,38 @@ struct AddDialog {
     error: Option<String>,
 }
 
+/// ⚙ Settings: the edited settings (saved as they change) and the size of the kept downloads
+struct SettingsDialog {
+    s: fetch::Settings,
+    downloads: u64,
+}
+
+#[derive(Clone, PartialEq)]
+enum YtUpdate {
+    Idle,
+    Updating,
+    Done(String),
+    Failed(String),
+}
+
+/// Open a file with its default app (the log).
+fn open_file(p: &Path) {
+    #[cfg(windows)]
+    let _ = std::process::Command::new("explorer").arg(p).spawn();
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(p).spawn();
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let _ = std::process::Command::new("xdg-open").arg(p).spawn();
+}
+
+fn open_log() {
+    let p = fetch::log_path();
+    if !p.is_file() {
+        fetch::log("(nothing has failed yet)");
+    }
+    open_file(&p);
+}
+
 struct App {
     shared: Arc<Mutex<Shared>>,
     tx: Sender<(u64, usize)>,
@@ -94,6 +128,8 @@ struct App {
     player: Option<player::Player>,
     play_error: Option<String>,
     add: Option<AddDialog>,
+    settings: Option<SettingsDialog>,
+    yt_update: Arc<Mutex<YtUpdate>>,
     ytdlp: Arc<Mutex<Ytdlp>>,
     transpose: i32,
     simple: bool,
@@ -142,19 +178,29 @@ fn worker(shared: Arc<Mutex<Shared>>, rx: std::sync::mpsc::Receiver<(u64, usize)
             }
             ctx.request_repaint();
         };
-        let (source, cache) = {
+        let source = {
             let g = shared.lock().unwrap();
             if !live(&g) {
                 continue;
             }
-            (g.songs[idx].source.clone(), g.cache.clone())
+            g.songs[idx].source.clone()
         };
         let mut meta: Option<fetch::Track> = None;
         if !matches!(source, Source::File) {
-            match fetch_audio(&source, &cache, &set, &shared, gen, idx) {
+            let status = |s: String| set(Status::Running(s));
+            let cancelled = || !live(&shared.lock().unwrap());
+            let progress = fetch::Progress { status: &status, cancelled: &cancelled };
+            match fetch_audio(&source, &progress, &shared, gen, idx) {
                 Ok(t) => meta = t,
-                Err(e) => {
-                    set(Status::Failed(e));
+                Err(f) if f.cleared() => continue,
+                Err(f) => {
+                    let mut g = shared.lock().unwrap();
+                    if live(&g) {
+                        g.songs[idx].status = Status::Failed(f.msg.clone());
+                        g.songs[idx].fail = Some(f);
+                    }
+                    drop(g);
+                    ctx.request_repaint();
                     continue;
                 }
             }
@@ -166,7 +212,7 @@ fn worker(shared: Arc<Mutex<Shared>>, rx: std::sync::mpsc::Receiver<(u64, usize)
                 None => continue,
             }
         };
-        set(Status::Running("Reading the file..."));
+        set(Status::Running("Reading the file...".into()));
         let audio = match songspec_core::audio::decode_file(&path) {
             Ok(a) => a,
             Err(e) => {
@@ -175,7 +221,7 @@ fn worker(shared: Arc<Mutex<Shared>>, rx: std::sync::mpsc::Receiver<(u64, usize)
             }
         };
         let eng = engine.get_or_insert_with(Engine::embedded);
-        let progress = |st: Stage| set(Status::Running(st.label()));
+        let progress = |st: Stage| set(Status::Running(st.label().into()));
         let r = eng.analyze(&audio, &Options::default(), &progress);
         drop(audio); // the decoded samples are freed as soon as the analysis is done
         let mut g = shared.lock().unwrap();
@@ -199,22 +245,21 @@ fn worker(shared: Arc<Mutex<Shared>>, rx: std::sync::mpsc::Receiver<(u64, usize)
 }
 
 /// A song from a link -> its audio file in the cache (song.path set), and the streaming service's title / artist when known.
-fn fetch_audio(source: &Source, cache: &Path, set: &dyn Fn(Status), shared: &Arc<Mutex<Shared>>, gen: u64, idx: usize) -> Result<Option<fetch::Track>, String> {
-    let exe = fetch::ytdlp().ok_or("yt-dlp isn't installed (Add songs → Get yt-dlp).")?;
+fn fetch_audio(source: &Source, p: &fetch::Progress, shared: &Arc<Mutex<Shared>>, gen: u64, idx: usize) -> Result<Option<fetch::Track>, fetch::Fail> {
+    let exe = fetch::ytdlp().ok_or_else(|| fetch::Fail { msg: "yt-dlp isn't installed (Add songs → Get yt-dlp).".into(), ..Default::default() })?;
     let (url, mut meta) = match source {
         Source::Song(t) => {
-            set(Status::Running("Finding it on YouTube..."));
-            (fetch::find_on_youtube(&exe, t)?, Some(t.clone()))
+            (p.status)("Finding it on YouTube...".into());
+            (fetch::find_on_youtube(&exe, t, p)?, Some(t.clone()))
         }
         Source::Video(u) => (u.clone(), None),
         Source::File => unreachable!(),
     };
-    set(Status::Running("Downloading the audio..."));
-    let (path, title) = fetch::download(&exe, &url, cache)?;
+    (p.status)("Downloading the audio...".into());
+    let (path, title) = fetch::download(&exe, &url, p).map_err(|f| fetch::Fail { url: Some(url.clone()), ..f })?;
     let mut g = shared.lock().unwrap();
     if g.gen != gen || idx >= g.songs.len() {
-        let _ = std::fs::remove_file(&path); // cleared while downloading
-        return Err("cleared".into());
+        return Err(fetch::Fail { msg: fetch::CLEARED.into(), ..Default::default() }); // cleared while downloading (the file stays in the downloads)
     }
     if meta.is_none() {
         g.songs[idx].name = title.clone();
@@ -237,12 +282,15 @@ impl App {
         let screenshot = raw.iter().position(|a| a == "--screenshot").and_then(|i| raw.get(i + 1)).map(PathBuf::from);
         fetch::load_settings();
         let ytdlp = Arc::new(Mutex::new(if fetch::ytdlp().is_some() { Ytdlp::Ready } else { Ytdlp::Missing }));
-        // keep the installed yt-dlp current (old copies start failing on YouTube); quietly, in the background
+        // keep the installed yt-dlp current (old copies start failing on YouTube) and note its version; quietly, in the background
         std::thread::spawn(|| {
             let _ = fetch::refresh_ytdlp(false);
+            if let Some(v) = fetch::ytdlp_version() {
+                fetch::log(&format!("SongSpec Analyzer {} started; yt-dlp {v}", songspec_core::ENGINE_VERSION));
+            }
         });
         let mut app = App {
-            shared, tx, selected: None, player: None, play_error: None, add: None, ytdlp, transpose: 0, simple: false,
+            shared, tx, selected: None, player: None, play_error: None, add: None, settings: None, yt_update: Arc::new(Mutex::new(YtUpdate::Idle)), ytdlp, transpose: 0, simple: false,
             tl_view_w: 800.0, tl_off: 0.0, tl_follow: true, volume: 1.0, muted_from: 1.0, click_volume: 0.8, flash: None, screenshot, shot_requested: false,
             confirm_clear: false,
             daw_prep: Default::default(),
@@ -268,7 +316,7 @@ impl App {
                 continue;
             }
             let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            self.push(Song { source: Source::File, path: Some(p), name, status: Status::Queued, result: None });
+            self.push(Song { source: Source::File, path: Some(p), name, status: Status::Queued, result: None, fail: None });
         }
     }
 
@@ -294,7 +342,7 @@ impl App {
                                 fetch::Item::Song(t) => (Source::Song(t.clone()), t.label()),
                                 fetch::Item::Video(u) => (Source::Video(u.clone()), u),
                             };
-                            enqueue(&shared, &tx, Song { source, path: None, name, status: Status::Queued, result: None }, Some(gen));
+                            enqueue(&shared, &tx, Song { source, path: None, name, status: Status::Queued, result: None, fail: None }, Some(gen));
                         }
                     }
                     Err(e) => {
@@ -317,8 +365,22 @@ impl App {
         self.player = None;
     }
 
+    /// Queue every failed song again (a song downloaded before isn't downloaded again).
+    fn retry_failed(&mut self) {
+        let mut g = self.shared.lock().unwrap();
+        let gen = g.gen;
+        for (i, s) in g.songs.iter_mut().enumerate() {
+            if matches!(s.status, Status::Failed(_)) {
+                s.status = Status::Queued;
+                s.fail = None;
+                let _ = self.tx.send((gen, i));
+            }
+        }
+    }
+
     /// Empty the queue: results, songs waiting, links still being read. A song being analysed right now finishes in the
-    /// background and is thrown away. Downloaded audio of the cleared songs is deleted (your own files are never touched).
+    /// background and is thrown away. Downloaded songs stay in the downloads (⚙ Settings deletes them); your own files are never
+    /// touched.
     fn clear_queue(&mut self) {
         self.player = None;
         self.play_error = None;
@@ -373,11 +435,6 @@ fn key_name(k: &songspec_core::key::Key) -> String {
 fn borrowed_from(a: &Analysis, chord: &str) -> Option<String> {
     let label = chord.split('/').next().unwrap_or(chord);
     a.key.as_ref()?.borrows.iter().find(|b| b.chords.iter().any(|c| c == label)).map(|b| b.from.clone())
-}
-
-fn title_case(s: &str) -> String {
-    let mut c = s.chars();
-    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
 }
 
 fn fmt_t(t: f64) -> String {
@@ -464,6 +521,11 @@ impl eframe::App for App {
                     self.add = Some(AddDialog { links: String::new(), error: None });
                 }
                 ui.label(RichText::new("or drop audio files anywhere in this window").color(MUTED));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("⚙ Settings").clicked() {
+                        self.settings = Some(SettingsDialog { s: fetch::settings(), downloads: fetch::downloads_size() });
+                    }
+                });
             });
             ui.add_space(4.0);
         });
@@ -497,6 +559,10 @@ impl eframe::App for App {
                         self.confirm_clear = false;
                         if ui.add_enabled(busy, egui::Button::new(RichText::new("🗑 Clear").small())).on_hover_text("Remove every song from the queue").clicked() {
                             self.confirm_clear = true;
+                        }
+                        let failed = snapshot.iter().filter(|s| matches!(s.1, Status::Failed(_))).count();
+                        if failed > 0 && ui.button(RichText::new(format!("↻ Retry failed ({failed})")).small()).on_hover_text("Queue the songs that failed again").clicked() {
+                            self.retry_failed();
                         }
                     }
                 });
@@ -575,6 +641,28 @@ impl eframe::App for App {
                 ui.label(RichText::new(status).size(13.0).color(MUTED));
                 if let Status::Failed(e) = &st {
                     ui.colored_label(BAD, e);
+                    let fail = self.shared.lock().unwrap().songs.get(i).and_then(|s| s.fail.clone());
+                    if let Some(f) = fail {
+                        if let Some(u) = &f.url {
+                            ui.horizontal(|ui| {
+                                ui.hyperlink_to(RichText::new(u).size(13.0), u);
+                                if ui.small_button("Copy link").clicked() {
+                                    ui.ctx().copy_text(u.clone());
+                                    self.flash = Some(("Link copied".into(), Instant::now()));
+                                }
+                            });
+                        }
+                        if !f.raw.trim().is_empty() {
+                            egui::CollapsingHeader::new(RichText::new("Details (yt-dlp's output)").size(12.0).color(MUTED)).id_salt(("fail", i)).show(ui, |ui| {
+                                egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                                    ui.add(egui::TextEdit::multiline(&mut f.raw.trim()).code_editor().desired_width(f32::INFINITY));
+                                });
+                                if ui.small_button("Open the log").clicked() {
+                                    open_log();
+                                }
+                            });
+                        }
+                    }
                 }
                 ui.add_space(6.0);
                 self.tiles(ui, res.as_deref());
@@ -594,6 +682,7 @@ impl eframe::App for App {
         });
 
         self.add_dialog(ctx);
+        self.settings_dialog(ctx);
         if self.player.as_ref().is_some_and(|p| p.is_playing()) {
             ctx.request_repaint_after(Duration::from_millis(33));
         }
@@ -1132,6 +1221,110 @@ impl App {
         });
     }
 
+    fn settings_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut d) = self.settings.take() else { return };
+        let mut keep = true;
+        let up = self.yt_update.lock().unwrap().clone();
+        let modal = egui::Modal::new(egui::Id::new("settings")).show(ctx, |ui| {
+            ui.set_width(500.0);
+            ui.heading("Settings");
+            ui.add_space(8.0);
+            ui.label(RichText::new("YouTube sign-in (cookies)").strong());
+            ui.horizontal(|ui| {
+                ui.radio_value(&mut d.s.cookies, fetch::CookieMode::None, "None");
+                ui.radio_value(&mut d.s.cookies, fetch::CookieMode::Firefox, "Firefox");
+                ui.radio_value(&mut d.s.cookies, fetch::CookieMode::File, "cookies.txt file");
+            });
+            if d.s.cookies == fetch::CookieMode::File {
+                ui.horizontal(|ui| {
+                    if ui.button("Choose cookies.txt…").clicked() {
+                        if let Some(f) = rfd::FileDialog::new().add_filter("cookies.txt", &["txt"]).pick_file() {
+                            d.s.cookies_file = Some(f);
+                        }
+                    }
+                    match &d.s.cookies_file {
+                        Some(f) if f.is_file() => ui.add(egui::Label::new(RichText::new(f.display().to_string()).size(12.0).color(MUTED)).truncate()),
+                        Some(_) => ui.label(RichText::new("that file is gone").size(12.0).color(WARN)),
+                        None => ui.label(RichText::new("no file chosen").size(12.0).color(WARN)),
+                    };
+                });
+            }
+            if d.s.cookies == fetch::CookieMode::Firefox && !fetch::firefox_installed() {
+                ui.label(RichText::new("No Firefox profile was found on this computer.").size(12.0).color(WARN));
+            }
+            sub(ui, "Only used when YouTube asks to confirm you're not a bot, or for age-restricted videos: a cookies.txt first, then Firefox. Chrome and Edge can't be used (they lock their cookies on Windows).");
+            ui.add_space(10.0);
+            ui.label(RichText::new("Pause between YouTube requests").strong());
+            ui.add(egui::Slider::new(&mut d.s.gap_secs, fetch::GAP_RANGE).step_by(0.5).suffix(" s"));
+            sub(ui, "Songs are fetched one at a time with this pause (±1 s) between requests. When YouTube still limits them, the app waits and retries (30 s, 1 min, 2 min).");
+            ui.add_space(10.0);
+            ui.label(RichText::new("yt-dlp").strong());
+            ui.horizontal(|ui| {
+                let v = fetch::known_ytdlp_version().map(|v| format!("version {v}")).unwrap_or("not installed".into());
+                ui.label(RichText::new(v).size(13.0));
+                if up == YtUpdate::Updating {
+                    ui.spinner();
+                    ui.label(RichText::new("updating…").size(13.0).color(ACCENT));
+                } else if ui.button("Update yt-dlp").clicked() {
+                    *self.yt_update.lock().unwrap() = YtUpdate::Updating;
+                    let (state, ready, ctx2) = (self.yt_update.clone(), self.ytdlp.clone(), ctx.clone());
+                    std::thread::spawn(move || {
+                        let r = fetch::update_ytdlp();
+                        if r.is_ok() {
+                            *ready.lock().unwrap() = Ytdlp::Ready;
+                        }
+                        *state.lock().unwrap() = match r {
+                            Ok(v) => YtUpdate::Done(v),
+                            Err(e) => YtUpdate::Failed(e),
+                        };
+                        ctx2.request_repaint();
+                    });
+                }
+                if ui.button("Open log").on_hover_text("Every failed YouTube request, with yt-dlp's version and full output").clicked() {
+                    open_log();
+                }
+            });
+            match &up {
+                YtUpdate::Done(v) => {
+                    ui.label(RichText::new(format!("Updated: yt-dlp {v}")).size(12.0).color(TARGET));
+                }
+                YtUpdate::Failed(e) => {
+                    ui.colored_label(BAD, format!("Update failed: {e}"));
+                }
+                _ => {}
+            }
+            sub(ui, "YouTube changes often and old copies stop working. The app also updates its copy every 3 days and after a refused download.");
+            ui.add_space(10.0);
+            ui.label(RichText::new("Downloaded songs").strong());
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(format!("{:.0} MB", d.downloads as f64 / 1e6)).size(13.0));
+                if ui.add_enabled(d.downloads > 0, egui::Button::new("Delete them")).clicked() {
+                    fetch::clear_downloads();
+                    d.downloads = 0;
+                }
+            });
+            sub(ui, "Songs from links are kept (up to 2 GB, the least recently used removed first) so adding one again doesn't ask YouTube again.");
+            ui.add_space(10.0);
+            if ui.button("Close").clicked() {
+                keep = false;
+            }
+        });
+        if modal.should_close() {
+            keep = false;
+        }
+        if d.s != fetch::settings() {
+            fetch::set_settings(d.s.clone());
+        }
+        if keep {
+            self.settings = Some(d);
+        } else if matches!(up, YtUpdate::Done(_) | YtUpdate::Failed(_)) {
+            *self.yt_update.lock().unwrap() = YtUpdate::Idle;
+        }
+        if up == YtUpdate::Updating {
+            ctx.request_repaint_after(Duration::from_millis(200));
+        }
+    }
+
     fn add_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut d) = self.add.take() else { return };
         let mut keep = true;
@@ -1155,22 +1348,7 @@ impl App {
             sub(ui, "One per line. A whole album or playlist is added song by song. Spotify and Apple Music songs are found on YouTube by title, artist and length.");
             match &yt {
                 Ytdlp::Ready => {
-                    ui.add_space(4.0);
-                    let mut b = fetch::cookies_from();
-                    let before = b.clone();
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Use my browser's YouTube login").size(13.0));
-                        egui::ComboBox::from_id_salt("cookies").selected_text(b.clone().map(|x| title_case(&x)).unwrap_or("No".into())).show_ui(ui, |ui| {
-                            ui.selectable_value(&mut b, None, "No");
-                            for br in fetch::BROWSERS {
-                                ui.selectable_value(&mut b, Some(br.to_string()), title_case(br));
-                            }
-                        });
-                    });
-                    if b != before {
-                        fetch::set_cookies_from(b);
-                    }
-                    sub(ui, "Only needed when YouTube asks to confirm you're not a bot, or for age-restricted songs. yt-dlp reads that browser's                              YouTube sign-in on this computer and uses it with YouTube only. Sign in to YouTube in that browser first; Chrome                              and Edge must be closed (and on Windows may still refuse), Firefox works best.");
+                    sub(ui, "If YouTube blocks downloads, see ⚙ Settings: the pause between songs, and a YouTube sign-in (Firefox or a cookies.txt).");
                 }
                 Ytdlp::Missing | Ytdlp::Failed(_) => {
                     ui.add_space(4.0);
@@ -1202,7 +1380,7 @@ impl App {
                 ui.colored_label(BAD, e);
             }
             ui.add_space(6.0);
-            sub(ui, "Downloaded audio stays in a temporary cache while the app is open and is deleted when you close it.");
+            sub(ui, "Downloaded songs are kept (up to 2 GB) so adding one again doesn't download it again; delete them in ⚙ Settings.");
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 let can = yt == Ytdlp::Ready && !d.links.trim().is_empty();
