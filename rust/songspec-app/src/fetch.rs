@@ -951,10 +951,10 @@ mod tests {
     #[test]
     fn old_settings_drop_chromium_browsers() {
         assert_eq!(utc_now().len(), "2026-11-16 14:03:07 UTC".len());
+        let _guard = SETTINGS_TEST.lock().unwrap_or_else(|e| e.into_inner()); // the whole test: it ends by reloading the settings
         let _ = std::fs::create_dir_all(app_dir());
         for (b, want) in [("edge", CookieMode::None), ("chrome", CookieMode::None), ("firefox", CookieMode::Firefox)] {
             std::fs::write(settings_path(), format!("{{\"cookies_from_browser\":\"{b}\"}}")).unwrap();
-            let _guard = SETTINGS_TEST.lock().unwrap();
             load_settings();
             assert_eq!(settings().cookies, want, "{b}");
             assert_eq!(settings().gap_secs, 4.0);
@@ -1001,7 +1001,7 @@ mod tests {
         };
         let cookies = dir.join("cookies.txt");
         std::fs::write(&cookies, "# Netscape HTTP Cookie File\n").unwrap();
-        let _guard = SETTINGS_TEST.lock().unwrap();
+        let _guard = SETTINGS_TEST.lock().unwrap_or_else(|e| e.into_inner());
         *SETTINGS.lock().unwrap() = Some(Settings { cookies: CookieMode::File, cookies_file: Some(cookies), gap_secs: 2.0 });
         let seen = Mutex::new(vec![]);
         let status = |s: String| seen.lock().unwrap().push(s);
